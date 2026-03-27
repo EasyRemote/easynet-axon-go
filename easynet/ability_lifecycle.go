@@ -58,8 +58,10 @@ const EphemeralSignature = "__AXON_EPHEMERAL_DO_NOT_USE_IN_PROD__"
 const DefaultAxonPort = 50051
 
 // AbilityDescriptor is a pure data descriptor for an Axon ability.
+// ToolName is the normalized MCP protocol identifier, computed once at construction.
 type AbilityDescriptor struct {
 	Name            string         `json:"name"`
+	ToolName        string         `json:"tool_name"`
 	Description     string         `json:"description"`
 	CommandTemplate string         `json:"command_template"`
 	InputSchema     map[string]any `json:"input_schema"`
@@ -144,6 +146,7 @@ func CreateAbility(
 	}
 	return &AbilityDescriptor{
 		Name:            name,
+		ToolName:        token,
 		Description:     description,
 		CommandTemplate: commandTemplate,
 		InputSchema:     inputSchema,
@@ -156,9 +159,8 @@ func CreateAbility(
 
 // ToToolSpec converts the descriptor to a ToolSpec for use with AbilityToolAdapter.
 func (d *AbilityDescriptor) ToToolSpec() ToolSpec {
-	token := normalizeAbilityName(d.Name)
 	return ToolSpec{
-		Name:        token,
+		Name:        d.ToolName,
 		Description: d.Description,
 		ResourceURI: d.ResourceURI,
 		Parameters:  d.InputSchema,
@@ -167,7 +169,7 @@ func (d *AbilityDescriptor) ToToolSpec() ToolSpec {
 
 // ExportAbility generates SKILL.md and invoke.sh for the given descriptor and target.
 func ExportAbility(descriptor *AbilityDescriptor, target AbilityTarget, axonEndpoint string) *AbilityExportResult {
-	token := normalizeAbilityName(descriptor.Name)
+	token := descriptor.ToolName
 	if axonEndpoint == "" {
 		axonEndpoint = fmt.Sprintf("http://127.0.0.1:%d", DefaultAxonPort)
 	}
@@ -217,7 +219,7 @@ func DeployToNode(
 	descriptor *AbilityDescriptor,
 	signature string,
 ) (*DeployResult, error) {
-	token := normalizeAbilityName(descriptor.Name)
+	token := descriptor.ToolName
 	abilityID := token
 
 	pubBuilder := BeginPhase(PhaseDeploy, tenant, nodeId, abilityID)
@@ -267,7 +269,7 @@ func InvokeAbility(
 	if args == nil {
 		args = map[string]any{}
 	}
-	return bridge.CallMCPTool(handle, tenant, toolName, nodeId, args)
+	return bridge.CallMCPTool(handle, tenant, normalizeAbilityName(toolName), nodeId, args)
 }
 
 // UninstallAbility uninstalls a deployed ability from a remote node.

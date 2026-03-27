@@ -11,6 +11,10 @@
 package remotecontrol
 
 import (
+	"fmt"
+	"os"
+	"sync"
+
 	"easynet.run/axon/sdk/go/easynet"
 	"easynet.run/axon/sdk/go/easynet/mcp"
 )
@@ -19,6 +23,67 @@ import (
 type RemoteControlCaseKit struct {
 	config              RemoteControlRuntimeConfig
 	orchestratorFactory BridgeFactory
+}
+
+// managedToolStreamHandle wraps an MCPToolStream with cleanup logic and idempotent Close.
+type managedToolStreamHandle struct {
+	inner   *easynet.MCPToolStream
+	cleanup func()
+	mu      sync.Mutex
+	closed  bool
+}
+
+// maxConsecutiveTimeoutRetries is the maximum number of consecutive per-chunk
+// timeouts before the stream is considered dead (matches Python/Java/Swift/Node).
+const maxConsecutiveTimeoutRetries = 3
+
+// Recv reads the next chunk from the underlying stream, retrying up to 3
+// consecutive timeouts before returning an error.
+func (h *managedToolStreamHandle) Recv() ([]byte, bool, error) {
+	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		return nil, true, nil
+	}
+	h.mu.Unlock()
+
+	consecutiveTimeouts := 0
+	for {
+		result, err := h.inner.Recv()
+		if err != nil {
+			return nil, false, err
+		}
+		if result.Done {
+			return nil, true, nil
+		}
+		if result.Timeout {
+			consecutiveTimeouts++
+			if consecutiveTimeouts >= maxConsecutiveTimeoutRetries {
+				return nil, false, easynet.DendriteError{
+					Message: fmt.Sprintf("stream timed out after %d consecutive retries", consecutiveTimeouts),
+				}
+			}
+			continue
+		}
+		return result.Chunk, false, nil
+	}
+}
+
+// Close closes the stream and invokes cleanup. Idempotent — safe to call multiple times.
+func (h *managedToolStreamHandle) Close() error {
+	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		return nil
+	}
+	h.closed = true
+	inner := h.inner
+	cleanup := h.cleanup
+	h.mu.Unlock()
+
+	err := inner.Close()
+	cleanup()
+	return err
 }
 
 // RemoteControlCaseKitOption customizes kit behavior.
@@ -53,7 +118,7 @@ func (kit *RemoteControlCaseKit) ToolSpecs() []map[string]any {
 }
 
 // HandleToolCall dispatches MCP calls by tool name.
-func (kit *RemoteControlCaseKit) HandleToolCall(name string, args map[string]any) mcp.ToolResult {
+func (kit *RemoteControlCaseKit) HandleToolCall(name string, args map[string]any) mcp.McpToolResult {
 	tenant := resolveTenant(args["tenant_id"], kit.config.Tenant)
 	switch name {
 	case "discover_nodes":
@@ -62,6 +127,19 @@ func (kit *RemoteControlCaseKit) HandleToolCall(name string, args map[string]any
 		return kit.handleListRemoteTools(tenant, args)
 	case "call_remote_tool":
 		return kit.handleCallRemoteTool(tenant, args)
+	case "call_remote_tool_stream":
+		handle, err := kit.HandleToolCallStream(name, args)
+		if err != nil {
+			return errorResult(tenant, err.Error(), nil)
+		}
+		if handle == nil {
+			return errorResult(tenant, "streaming not available", nil)
+		}
+		maxBytes := asInt(args["max_bytes"])
+		if maxBytes <= 0 {
+			maxBytes = mcp.DefaultMaxStreamBytes
+		}
+		return mcp.ConsumeStream(handle, maxBytes)
 	case "disconnect_device":
 		return kit.handleDisconnectDevice(tenant, args)
 	case "uninstall_ability":
@@ -74,37 +152,47 @@ func (kit *RemoteControlCaseKit) HandleToolCall(name string, args map[string]any
 		return kit.handleDeployAbility(tenant, args)
 	case "execute_command":
 		return kit.handleExecuteCommand(tenant, args)
-	default:
-		return mcp.ToolResult{
-			Payload: map[string]any{
-				"ok":        false,
-				"tenant_id": tenant,
-				"error":     "unknown tool: " + name,
-			},
-			IsError: true,
+		default:
+			return errorResult(tenant, "unknown tool: "+name, nil)
 		}
 	}
+
+// HandleToolCallStream opens a stream-capable tool and returns a managed handle
+// when the requested MCP tool supports incremental output.
+func (kit *RemoteControlCaseKit) HandleToolCallStream(name string, args map[string]any) (mcp.McpToolStreamHandle, error) {
+	if name != "call_remote_tool_stream" {
+		return nil, nil
+	}
+	tenant := resolveTenant(args["tenant_id"], kit.config.Tenant)
+	orchestrator := kit.orchestratorFactory(kit.config, tenant)
+	stream, err := kit.openCallRemoteToolStream(orchestrator, args)
+	if err != nil {
+		logCloseError("remotecontrol: failed closing orchestrator after stream open failure", orchestrator.Close())
+		return nil, err
+	}
+	return &managedToolStreamHandle{
+		inner:   stream,
+		cleanup: func() {
+			logCloseError("remotecontrol: failed closing orchestrator after stream completion", orchestrator.Close())
+		},
+	}, nil
 }
 
 func (kit *RemoteControlCaseKit) withOrchestrator(
 	tenant string,
 	fn func(*easynet.Orchestrator) (map[string]any, error),
-) mcp.ToolResult {
+) mcp.McpToolResult {
 	orchestrator := kit.orchestratorFactory(kit.config, tenant)
 	if err := orchestrator.Open(); err != nil {
-		return mcp.ToolResult{
-			Payload: map[string]any{"ok": false, "tenant_id": tenant, "error": err.Error()},
-			IsError: true,
-		}
+		return errorResult(tenant, err.Error(), nil)
 	}
-	defer func() { _ = orchestrator.Close() }()
+	defer func() {
+		logCloseError("remotecontrol: failed closing orchestrator", orchestrator.Close())
+	}()
 
 	payload, err := fn(orchestrator)
 	if err != nil {
-		return mcp.ToolResult{
-			Payload: map[string]any{"ok": false, "tenant_id": tenant, "error": err.Error()},
-			IsError: true,
-		}
+		return errorResult(tenant, err.Error(), nil)
 	}
 	if payload == nil {
 		payload = map[string]any{}
@@ -115,8 +203,30 @@ func (kit *RemoteControlCaseKit) withOrchestrator(
 	if _, ok := payload["tenant_id"]; !ok {
 		payload["tenant_id"] = tenant
 	}
-	return mcp.ToolResult{
+	return mcp.McpToolResult{
 		Payload: payload,
 		IsError: !asBool(payload["ok"]),
+	}
+}
+
+func logCloseError(context string, err error) {
+	if err == nil {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "%s: %v\n", context, err)
+}
+
+func errorResult(tenant string, message string, fields map[string]any) mcp.McpToolResult {
+	payload := map[string]any{
+		"ok":        false,
+		"tenant_id": tenant,
+		"error":     message,
+	}
+	for key, value := range fields {
+		payload[key] = value
+	}
+	return mcp.McpToolResult{
+		Payload: payload,
+		IsError: true,
 	}
 }

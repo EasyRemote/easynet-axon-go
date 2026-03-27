@@ -260,6 +260,24 @@ func (b *DendriteBridge) CallMCPTool(_ uint64, _ string, _ string, _ string, _ a
 	return nil, errDendriteUnsupported
 }
 
+// OpenMCPToolStream is the no-cgo stub; returns errDendriteUnsupported.
+func (b *DendriteBridge) OpenMCPToolStream(_ uint64, _ string, _ string, _ string, _ any, _ int) (uint64, error) {
+	_ = b
+	return 0, errDendriteUnsupported
+}
+
+// CallMCPToolStreamOpen is kept as a compatibility alias for older callers.
+func (b *DendriteBridge) CallMCPToolStreamOpen(
+	handle uint64,
+	tenantID string,
+	toolName string,
+	targetNodeID string,
+	argumentsJSON any,
+	timeoutMs int,
+) (uint64, error) {
+	return b.OpenMCPToolStream(handle, tenantID, toolName, targetNodeID, argumentsJSON, timeoutMs)
+}
+
 func (b *DendriteBridge) UninstallCapability(
 	_ uint64,
 	_ string,

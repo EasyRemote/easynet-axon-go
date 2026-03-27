@@ -34,7 +34,7 @@ import (
 	"easynet.run/axon/sdk/go/easynet/mcp"
 )
 
-func (kit *RemoteControlCaseKit) handleDiscoverNodes(tenant string, args map[string]any) mcp.ToolResult {
+func (kit *RemoteControlCaseKit) handleDiscoverNodes(tenant string, args map[string]any) mcp.McpToolResult {
 	_ = args
 	return kit.withOrchestrator(tenant, func(orch *easynet.Orchestrator) (map[string]any, error) {
 		nodes, err := orch.ListNodes("")
@@ -57,7 +57,7 @@ func (kit *RemoteControlCaseKit) handleDiscoverNodes(tenant string, args map[str
 	})
 }
 
-func (kit *RemoteControlCaseKit) handleListRemoteTools(tenant string, args map[string]any) mcp.ToolResult {
+func (kit *RemoteControlCaseKit) handleListRemoteTools(tenant string, args map[string]any) mcp.McpToolResult {
 	nodeID := asString(args["node_id"]) // empty string → no node filter
 	pattern := asString(args["name_pattern"])
 	return kit.withOrchestrator(tenant, func(orch *easynet.Orchestrator) (map[string]any, error) {
@@ -85,22 +85,16 @@ func (kit *RemoteControlCaseKit) handleListRemoteTools(tenant string, args map[s
 	})
 }
 
-func (kit *RemoteControlCaseKit) handleCallRemoteTool(tenant string, args map[string]any) mcp.ToolResult {
+func (kit *RemoteControlCaseKit) handleCallRemoteTool(tenant string, args map[string]any) mcp.McpToolResult {
 	toolName := asString(args["tool_name"])
 	nodeID := asString(args["node_id"])
 	callArgs := asMap(args["arguments"])
 
 	if toolName == "" {
-		return mcp.ToolResult{
-			Payload: map[string]any{"ok": false, "tenant_id": tenant, "error": "tool_name is required"},
-			IsError: true,
-		}
+		return errorResult(tenant, "tool_name is required", nil)
 	}
 	if nodeID == "" {
-		return mcp.ToolResult{
-			Payload: map[string]any{"ok": false, "tenant_id": tenant, "tool_name": toolName, "error": "node_id is required"},
-			IsError: true,
-		}
+		return errorResult(tenant, "node_id is required", map[string]any{"tool_name": toolName})
 	}
 	return kit.withOrchestrator(tenant, func(orch *easynet.Orchestrator) (map[string]any, error) {
 		call, err := orch.CallMCPTool(toolName, nodeID, callArgs)
@@ -116,13 +110,29 @@ func (kit *RemoteControlCaseKit) handleCallRemoteTool(tenant string, args map[st
 	})
 }
 
-func (kit *RemoteControlCaseKit) handleDisconnectDevice(tenant string, args map[string]any) mcp.ToolResult {
+// openCallRemoteToolStream validates args and opens a streaming MCP tool call.
+func (kit *RemoteControlCaseKit) openCallRemoteToolStream(
+	orch *easynet.Orchestrator,
+	args map[string]any,
+) (*easynet.MCPToolStream, error) {
+	toolName := asString(args["tool_name"])
+	nodeID := asString(args["node_id"])
+	callArgs := asMap(args["arguments"])
+	timeoutMs := asInt(args["timeout_ms"])
+
+	if toolName == "" {
+		return nil, errors.New("tool_name is required")
+	}
+	if nodeID == "" {
+		return nil, errors.New("node_id is required")
+	}
+	return orch.CallMCPToolStream(toolName, nodeID, callArgs, timeoutMs)
+}
+
+func (kit *RemoteControlCaseKit) handleDisconnectDevice(tenant string, args map[string]any) mcp.McpToolResult {
 	nodeID := asString(args["node_id"])
 	if nodeID == "" {
-		return mcp.ToolResult{
-			Payload: map[string]any{"ok": false, "tenant_id": tenant, "error": "node_id is required"},
-			IsError: true,
-		}
+		return errorResult(tenant, "node_id is required", nil)
 	}
 	reason := asStringOrDefault(args["reason"], "disconnect_device: requested by agent")
 	return kit.withOrchestrator(tenant, func(orch *easynet.Orchestrator) (map[string]any, error) {
@@ -140,20 +150,14 @@ func (kit *RemoteControlCaseKit) handleDisconnectDevice(tenant string, args map[
 	})
 }
 
-func (kit *RemoteControlCaseKit) handleUninstallAbility(tenant string, args map[string]any) mcp.ToolResult {
+func (kit *RemoteControlCaseKit) handleUninstallAbility(tenant string, args map[string]any) mcp.McpToolResult {
 	nodeID := asString(args["node_id"])
 	installID := asString(args["install_id"])
 	if nodeID == "" {
-		return mcp.ToolResult{
-			Payload: map[string]any{"ok": false, "tenant_id": tenant, "error": "node_id is required"},
-			IsError: true,
-		}
+		return errorResult(tenant, "node_id is required", nil)
 	}
 	if installID == "" {
-		return mcp.ToolResult{
-			Payload: map[string]any{"ok": false, "tenant_id": tenant, "node_id": nodeID, "error": "install_id is required"},
-			IsError: true,
-		}
+		return errorResult(tenant, "install_id is required", map[string]any{"node_id": nodeID})
 	}
 	reason := asStringOrDefault(args["reason"], "uninstall_ability: requested by agent")
 	return kit.withOrchestrator(tenant, func(orch *easynet.Orchestrator) (map[string]any, error) {
@@ -172,16 +176,13 @@ func (kit *RemoteControlCaseKit) handleUninstallAbility(tenant string, args map[
 	})
 }
 
-func (kit *RemoteControlCaseKit) handlePackageAbility(tenant string, args map[string]any) mcp.ToolResult {
+func (kit *RemoteControlCaseKit) handlePackageAbility(tenant string, args map[string]any) mcp.McpToolResult {
 	_ = tenant
 	descriptor, err := buildDescriptor(args, kit.config.SignatureBase64)
 	if err != nil {
-		return mcp.ToolResult{
-			Payload: map[string]any{"ok": false, "tenant_id": tenant, "error": err.Error()},
-			IsError: true,
-		}
+		return errorResult(tenant, err.Error(), nil)
 	}
-	return mcp.ToolResult{
+	return mcp.McpToolResult{
 		Payload: map[string]any{
 			"ok":        true,
 			"tenant_id": tenant,
@@ -190,18 +191,15 @@ func (kit *RemoteControlCaseKit) handlePackageAbility(tenant string, args map[st
 	}
 }
 
-func (kit *RemoteControlCaseKit) handleDeployAbilityPackage(tenant string, args map[string]any) mcp.ToolResult {
+func (kit *RemoteControlCaseKit) handleDeployAbilityPackage(tenant string, args map[string]any) mcp.McpToolResult {
 	nodeID := asString(args["node_id"])
 	if nodeID == "" {
-		return mcp.ToolResult{
-			Payload: map[string]any{"ok": false, "tenant_id": tenant, "error": "node_id is required"},
-			IsError: true,
-		}
+		return errorResult(tenant, "node_id is required", nil)
 	}
 	cleanupOnActivateFailure := asBoolOrDefault(args["cleanup_on_activate_failure"], true)
 	descriptor, err := parseOrBuildDescriptor(args, kit.config.SignatureBase64)
 	if err != nil {
-		return mcp.ToolResult{
+		return mcp.McpToolResult{
 			Payload: map[string]any{
 				"ok":        false,
 				"tenant_id": tenant,
@@ -233,50 +231,42 @@ func (kit *RemoteControlCaseKit) handleDeployAbilityPackage(tenant string, args 
 // deploy_ability_package pipeline into single-call operations.
 // ---------------------------------------------------------------------------
 
-func (kit *RemoteControlCaseKit) handleDeployAbility(tenant string, args map[string]any) mcp.ToolResult {
+func (kit *RemoteControlCaseKit) handleDeployAbility(tenant string, args map[string]any) mcp.McpToolResult {
 	nodeID := asString(args["node_id"])
 	if nodeID == "" {
-		return mcp.ToolResult{
+		return mcp.McpToolResult{
 			Payload: map[string]any{"ok": false, "tenant_id": tenant, "error": "node_id is required"},
 			IsError: true,
 		}
 	}
 	commandTemplate := asString(args["command_template"])
 	if commandTemplate == "" {
-		return mcp.ToolResult{
-			Payload: map[string]any{"ok": false, "tenant_id": tenant, "node_id": nodeID, "error": "command_template is required"},
-			IsError: true,
-		}
+		return errorResult(tenant, "command_template is required", map[string]any{"node_id": nodeID})
 	}
 	toolName := asString(args["tool_name"])
 	if toolName == "" {
-		toolName = fmt.Sprintf("tool_%s", randomHex(4))
+		toolName = fmt.Sprintf("tool_%d_%s", time.Now().UnixMilli(), randomHex(4))
 	}
 	description := asStringOrDefault(args["description"], fmt.Sprintf("Tool %s", toolName))
 
-	descriptor, err := buildDescriptor(map[string]any{
-		"ability_name":     toolName,
-		"tool_name":        toolName,
-		"description":      description,
-		"command_template": commandTemplate,
-		"version":          asString(args["version"]),
-		"tags":             args["tags"],
-		"package_id":       args["package_id"],
-		"capability_name":  args["capability_name"],
-		"signature_base64": args["signature_base64"],
-		"digest":           args["digest"],
+		descriptor, err := buildDescriptor(map[string]any{
+			"ability_name":     toolName,
+			"tool_name":        toolName,
+			"description":      description,
+			"command_template": commandTemplate,
+			"version":          asString(args["version"]),
+			"tags":             args["tags"],
+			"metadata":         args["metadata"],
+			"package_id":       args["package_id"],
+			"capability_name":  args["capability_name"],
+			"signature_base64": args["signature_base64"],
+			"digest":           args["digest"],
 	}, kit.config.SignatureBase64)
 	if err != nil {
-		return mcp.ToolResult{
-			Payload: map[string]any{
-				"ok":        false,
-				"tenant_id": tenant,
-				"node_id":   nodeID,
-				"tool_name": toolName,
-				"error":     err.Error(),
-			},
-			IsError: true,
-		}
+		return errorResult(tenant, err.Error(), map[string]any{
+			"node_id":   nodeID,
+			"tool_name": toolName,
+		})
 	}
 	return kit.withOrchestrator(tenant, func(orch *easynet.Orchestrator) (map[string]any, error) {
 		deploy, err := orch.DeployAbilityPackage(nodeID, descriptor.toDeployDescriptor(), true)
@@ -296,23 +286,23 @@ func (kit *RemoteControlCaseKit) handleDeployAbility(tenant string, args map[str
 	})
 }
 
-func (kit *RemoteControlCaseKit) handleExecuteCommand(tenant string, args map[string]any) mcp.ToolResult {
+func (kit *RemoteControlCaseKit) handleExecuteCommand(tenant string, args map[string]any) mcp.McpToolResult {
 	nodeID := asString(args["node_id"])
 	command := asString(args["command"])
 	if nodeID == "" {
-		return mcp.ToolResult{
+		return mcp.McpToolResult{
 			Payload: map[string]any{"ok": false, "tenant_id": tenant, "error": "node_id is required"},
 			IsError: true,
 		}
 	}
 	if command == "" {
-		return mcp.ToolResult{
+		return mcp.McpToolResult{
 			Payload: map[string]any{"ok": false, "tenant_id": tenant, "node_id": nodeID, "error": "command is required"},
 			IsError: true,
 		}
 	}
 	shouldCleanup := asBoolOrDefault(args["cleanup"], true)
-	toolName := fmt.Sprintf("cmd-%d-%s", time.Now().Unix(), randomHex(3))
+	toolName := fmt.Sprintf("cmd_%d_%s", time.Now().UnixMilli(), randomHex(4))
 
 	descriptor, err := buildDescriptor(map[string]any{
 		"ability_name":     toolName,
@@ -323,7 +313,7 @@ func (kit *RemoteControlCaseKit) handleExecuteCommand(tenant string, args map[st
 		"signature_base64": kit.config.SignatureBase64,
 	}, kit.config.SignatureBase64)
 	if err != nil {
-		return mcp.ToolResult{
+		return mcp.McpToolResult{
 			Payload: map[string]any{
 				"ok":        false,
 				"tenant_id": tenant,

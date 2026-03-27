@@ -57,3 +57,54 @@ func (o *Orchestrator) CallMCPTool(toolName string, targetNodeID string, argumen
 	}
 	return o.bridge.CallMCPTool(o.handle, o.Tenant, toolName, targetNodeID, argumentsJSON)
 }
+
+// MCPToolStream wraps a streaming MCP tool call, providing Next and Close operations.
+type MCPToolStream struct {
+	bridge       *DendriteBridge
+	streamHandle uint64
+}
+
+// Next pulls the next chunk from the stream.
+// If timeoutMs <= 0 the bridge layer applies its own default.
+func (s *MCPToolStream) Next(timeoutMs int) (StreamNextResult, error) {
+	return s.bridge.StreamNext(s.streamHandle, timeoutMs)
+}
+
+// Recv pulls the next chunk using the stream's configured default timeout.
+func (s *MCPToolStream) Recv() (StreamNextResult, error) {
+	return s.Next(0)
+}
+
+// Close closes the stream and releases its resources.
+func (s *MCPToolStream) Close() error {
+	return s.bridge.StreamClose(s.streamHandle)
+}
+
+// Handle returns the underlying stream handle for advanced use.
+func (s *MCPToolStream) Handle() uint64 {
+	return s.streamHandle
+}
+
+// CallMCPToolStream opens a streaming MCP tool call and returns an MCPToolStream for
+// incremental consumption. The caller must call Close on the returned stream when done.
+func (o *Orchestrator) CallMCPToolStream(
+	toolName string,
+	targetNodeID string,
+	argumentsJSON any,
+	timeoutMs int,
+) (*MCPToolStream, error) {
+	if err := o.Open(); err != nil {
+		return nil, err
+	}
+	if timeoutMs <= 0 {
+		timeoutMs = DefaultMCPToolStreamTimeoutMs
+	}
+	sh, err := o.bridge.OpenMCPToolStream(o.handle, o.Tenant, toolName, targetNodeID, argumentsJSON, timeoutMs)
+	if err != nil {
+		return nil, err
+	}
+	return &MCPToolStream{
+		bridge:       o.bridge,
+		streamHandle: sh,
+	}, nil
+}

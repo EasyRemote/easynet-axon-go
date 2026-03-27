@@ -209,6 +209,58 @@ func (b *DendriteBridge) CallMCPTool(
 	return b.callHelperPayload(handle, payload, b.sym.callMcpTool)
 }
 
+// OpenMCPToolStream opens a streaming MCP tool call and returns a stream handle.
+// The returned stream handle can be read with StreamNext and closed with StreamClose.
+func (b *DendriteBridge) OpenMCPToolStream(
+	handle uint64,
+	tenantID string,
+	toolName string,
+	targetNodeID string,
+	argumentsJSON any,
+	timeoutMs int,
+) (uint64, error) {
+	if b.sym.callMcpToolStreamOpen == nil {
+		return 0, DendriteError{
+			Message: "dendrite bridge symbol not available: axon_dendrite_call_mcp_tool_stream_open_json",
+			Code:    ErrCodeBridge,
+		}
+	}
+	if argumentsJSON == nil {
+		argumentsJSON = map[string]any{}
+	}
+	if timeoutMs <= 0 {
+		timeoutMs = DefaultMCPToolStreamTimeoutMs
+	}
+	payload := map[string]any{
+		"tenant_id":      tenantID,
+		"tool_name":      toolName,
+		"target_node_id": targetNodeID,
+		"arguments_json": argumentsJSON,
+		"timeout_ms":     timeoutMs,
+	}
+	resp, err := b.callHelperPayload(handle, payload, b.sym.callMcpToolStreamOpen)
+	if err != nil {
+		return 0, err
+	}
+	sh, _ := resp["stream_handle"].(float64)
+	if sh == 0 {
+		return 0, DendriteError{Message: "failed to open MCP tool stream: missing stream_handle"}
+	}
+	return uint64(sh), nil
+}
+
+// CallMCPToolStreamOpen is kept as a compatibility alias for older callers.
+func (b *DendriteBridge) CallMCPToolStreamOpen(
+	handle uint64,
+	tenantID string,
+	toolName string,
+	targetNodeID string,
+	argumentsJSON any,
+	timeoutMs int,
+) (uint64, error) {
+	return b.OpenMCPToolStream(handle, tenantID, toolName, targetNodeID, argumentsJSON, timeoutMs)
+}
+
 // UninstallCapabilityWithRequest uninstalls a capability using a typed request object.
 func (b *DendriteBridge) UninstallCapabilityWithRequest(handle uint64, req UninstallCapabilityRequest) (map[string]any, error) {
 	payload, err := req.helperPayload()

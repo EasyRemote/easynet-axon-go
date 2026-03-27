@@ -29,6 +29,11 @@ const (
 	// DefaultTimeoutMs is the default RPC/request timeout in milliseconds.
 	DefaultTimeoutMs = 30000
 
+	// DefaultMCPToolStreamTimeoutMs is the default per-chunk timeout for MCP
+	// tool stream reads.  Long-running streams (e.g. PTY sessions) should set
+	// an explicit higher value.
+	DefaultMCPToolStreamTimeoutMs = 60000
+
 	// DefaultConnectTimeoutMs is the default connection timeout in milliseconds.
 	DefaultConnectTimeoutMs = 5000
 

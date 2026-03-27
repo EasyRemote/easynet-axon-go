@@ -127,48 +127,49 @@ var placeholderDeploySignatureWarning sync.Once
 // DendriteError and its Error() method are in dendrite_bridge_types.go.
 
 type dendriteBridgeSymbols struct {
-	open            unsafe.Pointer
-	close           unsafe.Pointer
-	unary           unsafe.Pointer
-	stream          unsafe.Pointer
-	clientStream    unsafe.Pointer
-	bidiStream      unsafe.Pointer
-	invokeAbility   unsafe.Pointer
-	protocolCatalog unsafe.Pointer
-	invokeProtocol  unsafe.Pointer
-	listNodes       unsafe.Pointer
-	registerNode    unsafe.Pointer
-	heartbeat       unsafe.Pointer
-	publishAbility  unsafe.Pointer
-	installAbility  unsafe.Pointer
-	activateAbility unsafe.Pointer
-	listA2aAgents   unsafe.Pointer
-	getA2aAgentCard unsafe.Pointer
-	sendA2aTask     unsafe.Pointer
-	deployListDir   unsafe.Pointer
-	listMcpTools    unsafe.Pointer
-	callMcpTool     unsafe.Pointer
-	uninstall       unsafe.Pointer
-	deregisterNode  unsafe.Pointer
-	drainNode       unsafe.Pointer
-	updateListDir   unsafe.Pointer
-	voiceCreateCall unsafe.Pointer
-	voiceGetCall    unsafe.Pointer
-	voiceJoinCall   unsafe.Pointer
-	voiceLeaveCall  unsafe.Pointer
-	voiceUpdatePath unsafe.Pointer
-	voiceReport     unsafe.Pointer
-	voiceEndCall    unsafe.Pointer
-	voiceWatchCall  unsafe.Pointer
-	voiceCreateSess unsafe.Pointer
-	voiceGetSess    unsafe.Pointer
-	voiceSetDesc    unsafe.Pointer
-	voiceAddCand    unsafe.Pointer
-	voiceRefresh    unsafe.Pointer
-	voiceEndSess    unsafe.Pointer
-	voiceWatchSess  unsafe.Pointer
-	coverage        unsafe.Pointer
-	stringFree      unsafe.Pointer
+	open                  unsafe.Pointer
+	close                 unsafe.Pointer
+	unary                 unsafe.Pointer
+	stream                unsafe.Pointer
+	clientStream          unsafe.Pointer
+	bidiStream            unsafe.Pointer
+	invokeAbility         unsafe.Pointer
+	protocolCatalog       unsafe.Pointer
+	invokeProtocol        unsafe.Pointer
+	listNodes             unsafe.Pointer
+	registerNode          unsafe.Pointer
+	heartbeat             unsafe.Pointer
+	publishAbility        unsafe.Pointer
+	installAbility        unsafe.Pointer
+	activateAbility       unsafe.Pointer
+	listA2aAgents         unsafe.Pointer
+	getA2aAgentCard       unsafe.Pointer
+	sendA2aTask           unsafe.Pointer
+	deployListDir         unsafe.Pointer
+	listMcpTools          unsafe.Pointer
+	callMcpTool           unsafe.Pointer
+	callMcpToolStreamOpen unsafe.Pointer
+	uninstall             unsafe.Pointer
+	deregisterNode        unsafe.Pointer
+	drainNode             unsafe.Pointer
+	updateListDir         unsafe.Pointer
+	voiceCreateCall       unsafe.Pointer
+	voiceGetCall          unsafe.Pointer
+	voiceJoinCall         unsafe.Pointer
+	voiceLeaveCall        unsafe.Pointer
+	voiceUpdatePath       unsafe.Pointer
+	voiceReport           unsafe.Pointer
+	voiceEndCall          unsafe.Pointer
+	voiceWatchCall        unsafe.Pointer
+	voiceCreateSess       unsafe.Pointer
+	voiceGetSess          unsafe.Pointer
+	voiceSetDesc          unsafe.Pointer
+	voiceAddCand          unsafe.Pointer
+	voiceRefresh          unsafe.Pointer
+	voiceEndSess          unsafe.Pointer
+	voiceWatchSess        unsafe.Pointer
+	coverage              unsafe.Pointer
+	stringFree            unsafe.Pointer
 	// Incremental streaming (optional — may be nil for older native libraries)
 	serverStreamOpen unsafe.Pointer
 	streamNext       unsafe.Pointer
@@ -377,6 +378,7 @@ func OpenDendriteBridge(libPath string) (*DendriteBridge, error) {
 		_ = C.axon_dlclose(lib)
 		return nil, err
 	}
+	sym.callMcpToolStreamOpen = lookupOptional("axon_dendrite_call_mcp_tool_stream_open_json")
 	if sym.uninstall, err = lookup("axon_dendrite_uninstall_capability_json"); err != nil {
 		_ = C.axon_dlclose(lib)
 		return nil, err
@@ -1101,7 +1103,7 @@ func (b *DendriteBridge) StreamNext(streamHandle uint64, timeoutMs int) (StreamN
 		return StreamNextResult{}, errStreamingUnsupported
 	}
 	if timeoutMs <= 0 {
-		timeoutMs = DefaultTimeoutMs
+		timeoutMs = DefaultMCPToolStreamTimeoutMs
 	}
 	payload := map[string]any{"timeout_ms": timeoutMs}
 	resp, err := b.callLockedWithPayload(streamHandle, false, payload, func(
