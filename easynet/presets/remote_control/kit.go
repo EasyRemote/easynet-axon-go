@@ -2,7 +2,22 @@
 // =========================
 //
 // File: sdk/go/easynet/presets/remote_control/kit.go
-// Description: RemoteControlCaseKit: MCP tool provider with orchestrator dispatch.
+// Description: Go `RemoteControlCaseKit` MCP provider with orchestrator dispatch and managed stream cleanup.
+//
+// Protocol Responsibility:
+// - Assembles remote-control tool specs, handler dispatch, and orchestrator lifecycle into one MCP provider surface.
+// - Owns bridge or orchestrator cleanup for unary and streaming tool calls so callers do not leak resources.
+//
+// Implementation Approach:
+// - Keeps entrypoints thin by delegating validation and business logic to focused handler/orchestrator modules.
+// - Caches or scopes transport resources according to the SDK runtime model while preserving per-tenant correctness.
+//
+// Usage Contract:
+// - Use this as the preset-level integration point when exposing EasyNet remote-control tools over MCP.
+// - Factory injection points should preserve the same request/response semantics as the default orchestrator.
+//
+// Architectural Position:
+// - Preset composition boundary above handler modules and below case/example entrypoints.
 //
 // Author: Silan.Hu
 // Email: silan.hu@u.nus.edu
@@ -152,10 +167,22 @@ func (kit *RemoteControlCaseKit) HandleToolCall(name string, args map[string]any
 		return kit.handleDeployAbility(tenant, args)
 	case "execute_command":
 		return kit.handleExecuteCommand(tenant, args)
-		default:
-			return errorResult(tenant, "unknown tool: "+name, nil)
-		}
+	case "drain_device":
+		return kit.handleDrainDevice(tenant, args)
+	case "build_ability_descriptor":
+		return kit.handleCreateAbility(tenant, args)
+	case "export_ability_skill":
+		return kit.handleExportAbilitySkill(tenant, args)
+	case "redeploy_ability":
+		return kit.handleRedeployAbility(tenant, args)
+	case "list_abilities":
+		return kit.handleListAbilities(tenant, args)
+	case "forget_all":
+		return kit.handleForgetAll(tenant, args)
+	default:
+		return errorResult(tenant, "unknown tool: "+name, nil)
 	}
+}
 
 // HandleToolCallStream opens a stream-capable tool and returns a managed handle
 // when the requested MCP tool supports incremental output.
@@ -171,7 +198,7 @@ func (kit *RemoteControlCaseKit) HandleToolCallStream(name string, args map[stri
 		return nil, err
 	}
 	return &managedToolStreamHandle{
-		inner:   stream,
+		inner: stream,
 		cleanup: func() {
 			logCloseError("remotecontrol: failed closing orchestrator after stream completion", orchestrator.Close())
 		},

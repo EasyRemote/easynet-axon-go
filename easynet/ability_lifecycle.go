@@ -2,7 +2,22 @@
 // =========================
 //
 // File: sdk/go/easynet/ability_lifecycle.go
-// Description: Ability lifecycle API: create, deploy, invoke, and export as Agent Skills.
+// Description: Go SDK ability lifecycle API for descriptor creation, deployment, invocation, and skill export workflows.
+//
+// Protocol Responsibility:
+// - Defines typed ability descriptors, export targets, and deployment helpers exposed to SDK users.
+// - Keeps cross-language ability naming, resource-uri, and tool-spec semantics aligned.
+//
+// Implementation Approach:
+// - Separates pure descriptor/export helpers from bridge-backed deployment and invocation flows.
+// - Uses explicit validation and stable defaults so generated ability artifacts stay deterministic.
+//
+// Usage Contract:
+// - Callers must provide valid command templates, schema objects, and runtime context for deployment helpers.
+// - Returned descriptors and exported skill artifacts should be treated as stable SDK-level contracts.
+//
+// Architectural Position:
+// - High-level SDK facade above preset/orchestrator layers and below application examples.
 //
 // Author: Silan.Hu
 // Email: silan.hu@u.nus.edu
@@ -12,6 +27,7 @@ package easynet
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -69,6 +85,12 @@ type AbilityDescriptor struct {
 	Version         string         `json:"version"`
 	Tags            []string       `json:"tags"`
 	ResourceURI     string         `json:"resource_uri"`
+	// Agent ecosystem extensions (SKILL.md / MCP / CLI)
+	Instructions    string            `json:"instructions,omitempty"`
+	InputExamples   []any             `json:"input_examples,omitempty"`
+	Prerequisites   []string          `json:"prerequisites,omitempty"`
+	ContextBindings map[string]string `json:"context_bindings,omitempty"`
+	Category        string            `json:"category,omitempty"`
 }
 
 // AbilityExportResult holds the generated SKILL.md and invoke.sh content.
@@ -114,13 +136,18 @@ func normalizeAbilityName(raw string) string {
 	return result
 }
 
-// CreateAbility validates and builds an AbilityDescriptor.
-func CreateAbility(
+// BuildAbilityDescriptor validates and builds an AbilityDescriptor locally.
+func BuildAbilityDescriptor(
 	name, description, commandTemplate string,
 	inputSchema, outputSchema map[string]any,
 	version string,
 	tags []string,
 	resourceURI string,
+	instructions string,
+	inputExamples []any,
+	prerequisites []string,
+	contextBindings map[string]string,
+	category string,
 ) (*AbilityDescriptor, error) {
 	if strings.TrimSpace(name) == "" {
 		return nil, DendriteError{Message: "ability name cannot be empty", Code: ErrCodeValidation}
@@ -154,6 +181,11 @@ func CreateAbility(
 		Version:         version,
 		Tags:            tags,
 		ResourceURI:     resourceURI,
+		Instructions:    instructions,
+		InputExamples:   inputExamples,
+		Prerequisites:   prerequisites,
+		ContextBindings: contextBindings,
+		Category:        category,
 	}, nil
 }
 
@@ -168,18 +200,21 @@ func (d *AbilityDescriptor) ToToolSpec() ToolSpec {
 }
 
 // ExportAbility generates SKILL.md and invoke.sh for the given descriptor and target.
-func ExportAbility(descriptor *AbilityDescriptor, target AbilityTarget, axonEndpoint string) *AbilityExportResult {
+func ExportAbility(descriptor *AbilityDescriptor, target AbilityTarget, axonEndpoint string) (*AbilityExportResult, error) {
 	token := descriptor.ToolName
 	if axonEndpoint == "" {
 		axonEndpoint = fmt.Sprintf("http://127.0.0.1:%d", DefaultAxonPort)
 	}
-	invokeScript := generateInvokeScript(descriptor.ResourceURI, axonEndpoint)
+	invokeScript, err := generateInvokeScript(descriptor.ResourceURI, axonEndpoint)
+	if err != nil {
+		return nil, err
+	}
 	abilityMd := generateAbilityMd(descriptor, target, token)
 	return &AbilityExportResult{
 		AbilityMd:    abilityMd,
 		InvokeScript: invokeScript,
 		AbilityName:  token,
-	}
+	}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -222,17 +257,36 @@ func DeployToNode(
 	token := descriptor.ToolName
 	abilityID := token
 
+	buildArgs := map[string]any{
+		"ability_name":     descriptor.Name,
+		"tool_name":        token,
+		"description":      descriptor.Description,
+		"command_template": descriptor.CommandTemplate,
+		"version":          descriptor.Version,
+		"input_schema":     descriptor.InputSchema,
+		"output_schema":    descriptor.OutputSchema,
+		"signature_base64": signature,
+		"tags":             descriptor.Tags,
+	}
+	if descriptor.Instructions != "" {
+		buildArgs["instructions"] = descriptor.Instructions
+	}
+	if len(descriptor.InputExamples) > 0 {
+		buildArgs["input_examples"] = descriptor.InputExamples
+	}
+	if len(descriptor.Prerequisites) > 0 {
+		buildArgs["prerequisites"] = descriptor.Prerequisites
+	}
+	if len(descriptor.ContextBindings) > 0 {
+		buildArgs["context_bindings"] = descriptor.ContextBindings
+	}
+	if descriptor.Category != "" {
+		buildArgs["category"] = descriptor.Category
+	}
+	pkg := BuildDeployPackage(buildArgs, signature)
+
 	pubBuilder := BeginPhase(PhaseDeploy, tenant, nodeId, abilityID)
-	result, err := bridge.DeployMCPListDirWithRequest(handle, DeployMCPListDirRequest{
-		TenantID:        tenant,
-		NodeID:          nodeId,
-		TargetPath:      token,
-		CommandTemplate: descriptor.CommandTemplate,
-		CapabilityName:  descriptor.Name,
-		ToolName:        token,
-		Version:         descriptor.Version,
-		SignatureBase64: signature,
-	})
+	result, err := DeployPackage(bridge, handle, tenant, nodeId, pkg)
 	if err != nil {
 		receipt := pubBuilder.FinishErr(err)
 		trace := BuildDeployTrace([]PhaseReceipt{receipt})
@@ -398,14 +452,23 @@ func ForgetAll(
 		return nil, err
 	}
 
-	// Dry-run mode: collect the list of abilities that would be removed
-	// without performing any uninstalls.
+	// Dry-run mode: separate tools into removable (have install_id) and
+	// non-removable (missing install_id — typically federated or synthetic
+	// entries).  The Failed list gives callers visibility into entries that
+	// cannot be uninstalled, matching Java/Node/Python/Rust behaviour.
 	if dryRun {
 		wouldRemove := make([]string, 0)
+		wouldFail := make([]ForgetAllFailure, 0)
 		for _, tool := range tools {
 			installID, _ := tool["install_id"].(string)
 			toolName, _ := tool["tool_name"].(string)
 			if installID == "" {
+				if toolName != "" {
+					wouldFail = append(wouldFail, ForgetAllFailure{
+						ToolName: toolName,
+						Error:    "missing install_id",
+					})
+				}
 				continue
 			}
 			wouldRemove = append(wouldRemove, toolName)
@@ -413,8 +476,8 @@ func ForgetAll(
 		return &ForgetAllResult{
 			Removed:      wouldRemove,
 			RemovedCount: len(wouldRemove),
-			Failed:       []ForgetAllFailure{},
-			FailedCount:  0,
+			Failed:       wouldFail,
+			FailedCount:  len(wouldFail),
 		}, nil
 	}
 
@@ -490,37 +553,177 @@ func ListRemoteTools(
 	return bridge.ListMCPTools(handle, tenant, namePattern, nil, nodeId)
 }
 
+func stringFromAbilityArg(raw any) string {
+	switch value := raw.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(value)
+	default:
+		return strings.TrimSpace(fmt.Sprint(value))
+	}
+}
+
+func coerceStringSlice(raw any) []string {
+	switch value := raw.(type) {
+	case nil:
+		return nil
+	case []string:
+		out := make([]string, 0, len(value))
+		for _, item := range value {
+			if trimmed := strings.TrimSpace(item); trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(value))
+		for _, item := range value {
+			if trimmed := stringFromAbilityArg(item); trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func coerceStringMap(raw any) map[string]string {
+	switch value := raw.(type) {
+	case nil:
+		return nil
+	case map[string]string:
+		out := make(map[string]string, len(value))
+		for key, item := range value {
+			if trimmed := strings.TrimSpace(item); trimmed != "" {
+				out[key] = trimmed
+			}
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]string, len(value))
+		for key, item := range value {
+			if trimmed := stringFromAbilityArg(item); trimmed != "" {
+				out[key] = trimmed
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func mergeAbilityMetadata(base map[string]string, raw any) map[string]string {
+	merged := make(map[string]string, len(base))
+	for key, value := range base {
+		merged[key] = value
+	}
+	for key, value := range coerceStringMap(raw) {
+		if _, exists := merged[key]; !exists {
+			merged[key] = value
+		}
+	}
+	return merged
+}
+
 // PackageSkill builds a native skill package descriptor from arguments.
 func BuildDeployPackage(args map[string]any, signature string) map[string]any {
-	abilityName, _ := args["ability_name"].(string)
-	toolName, _ := args["tool_name"].(string)
+	abilityName := stringFromAbilityArg(args["ability_name"])
+	token := normalizeAbilityName(abilityName)
+	toolName := stringFromAbilityArg(args["tool_name"])
 	if toolName == "" {
 		toolName = abilityName
 	}
+	if toolName == "" {
+		toolName = token
+	}
+	packageID := stringFromAbilityArg(args["package_id"])
+	if packageID == "" {
+		packageID = fmt.Sprintf("pkg.ability.%s.%d", token, time.Now().UnixMilli())
+	}
+	capabilityName := stringFromAbilityArg(args["capability_name"])
+	if capabilityName == "" {
+		capabilityName = fmt.Sprintf("ability_%s", token)
+	}
 	defaultSchema := map[string]any{"type": "object", "properties": map[string]any{}}
-	inputSchema := args["input_schema"]
+	inputSchema, _ := args["input_schema"].(map[string]any)
 	if inputSchema == nil {
 		inputSchema = defaultSchema
 	}
-	outputSchema := args["output_schema"]
+	outputSchema, _ := args["output_schema"].(map[string]any)
 	if outputSchema == nil {
 		outputSchema = defaultSchema
 	}
-	version, _ := args["version"].(string)
+	version := stringFromAbilityArg(args["version"])
 	if version == "" {
 		version = "1.0.0"
 	}
-	return map[string]any{
-		"ability_name":     abilityName,
-		"tool_name":        toolName,
-		"description":      args["description"],
-		"command_template": args["command_template"],
-		"input_schema":     inputSchema,
-		"output_schema":    outputSchema,
-		"version":          version,
-		"tags":             args["tags"],
-		"signature_base64": signature,
+	description := stringFromAbilityArg(args["description"])
+	if description == "" && abilityName != "" {
+		description = fmt.Sprintf("Ability %s", abilityName)
 	}
+	commandTemplate := stringFromAbilityArg(args["command_template"])
+	signatureBase64 := stringFromAbilityArg(args["signature_base64"])
+	if signatureBase64 == "" {
+		signatureBase64 = signature
+	}
+	metadata := map[string]string{
+		"mcp.tool_name":     toolName,
+		"mcp.description":   description,
+		"mcp.input_schema":  string(mustJSONMarshal(inputSchema)),
+		"mcp.output_schema": string(mustJSONMarshal(outputSchema)),
+		"axon.exec.command": commandTemplate,
+		"ability.name":      abilityName,
+		"ability.version":   version,
+	}
+	if instructions := stringFromAbilityArg(args["instructions"]); instructions != "" {
+		metadata["mcp.instructions"] = instructions
+	}
+	if inputExamples, ok := args["input_examples"].([]any); ok && len(inputExamples) > 0 {
+		metadata["mcp.input_examples"] = string(mustJSONMarshal(inputExamples))
+	}
+	if prerequisites := coerceStringSlice(args["prerequisites"]); len(prerequisites) > 0 {
+		metadata["mcp.prerequisites"] = string(mustJSONMarshal(prerequisites))
+	}
+	if contextBindings := coerceStringMap(args["context_bindings"]); len(contextBindings) > 0 {
+		metadata["mcp.context_bindings"] = string(mustJSONMarshal(contextBindings))
+	}
+	if category := stringFromAbilityArg(args["category"]); category != "" {
+		metadata["mcp.category"] = category
+	}
+	metadata = mergeAbilityMetadata(metadata, args["metadata"])
+
+	payload := map[string]any{
+		"kind":               "axon.ability.package.v1",
+		"ability_name":       abilityName,
+		"package_id":         packageID,
+		"capability_name":    capabilityName,
+		"tool_name":          toolName,
+		"description":        description,
+		"version":            version,
+		"command_template":   commandTemplate,
+		"input_schema":       inputSchema,
+		"output_schema":      outputSchema,
+		"created_at_unix_ms": time.Now().UnixMilli(),
+	}
+
+	pkg := map[string]any{
+		"ability_name":         abilityName,
+		"package_id":           packageID,
+		"capability_name":      capabilityName,
+		"tool_name":            toolName,
+		"description":          description,
+		"version":              version,
+		"tags":                 coerceStringSlice(args["tags"]),
+		"metadata":             metadata,
+		"signature_base64":     signatureBase64,
+		"package_bytes_base64": base64.StdEncoding.EncodeToString(mustJSONMarshal(payload)),
+	}
+	if digest := stringFromAbilityArg(args["digest"]); digest != "" {
+		pkg["digest"] = digest
+	}
+	return pkg
 }
 
 // DeployPackage deploys a native skill package by publish/install/activate.
@@ -531,37 +734,104 @@ func DeployPackage(
 	nodeId string,
 	pkg map[string]any,
 ) (map[string]any, error) {
-	abilityName, _ := pkg["ability_name"].(string)
-	toolName, _ := pkg["tool_name"].(string)
-	if toolName == "" {
-		toolName = abilityName
+	packageID := stringFromAbilityArg(pkg["package_id"])
+	capabilityName := stringFromAbilityArg(pkg["capability_name"])
+	version := stringFromAbilityArg(pkg["version"])
+	signatureBase64 := stringFromAbilityArg(pkg["signature_base64"])
+	packageBytesBase64 := stringFromAbilityArg(pkg["package_bytes_base64"])
+	digest := stringFromAbilityArg(pkg["digest"])
+	tags := coerceStringSlice(pkg["tags"])
+	metadata := coerceStringMap(pkg["metadata"])
+	if metadata == nil {
+		metadata = map[string]string{}
 	}
-	cmdTemplate, _ := pkg["command_template"].(string)
-	version, _ := pkg["version"].(string)
-	sig, _ := pkg["signature_base64"].(string)
-	inputSchema, _ := pkg["input_schema"].(map[string]any)
-	outputSchema, _ := pkg["output_schema"].(map[string]any)
-	var tags []string
-	if rawTags, ok := pkg["tags"].([]any); ok {
-		for _, t := range rawTags {
-			if s, ok := t.(string); ok {
-				tags = append(tags, s)
+	if packageID == "" {
+		return nil, fmt.Errorf("package_id is required")
+	}
+	if capabilityName == "" {
+		return nil, fmt.Errorf("capability_name is required")
+	}
+	if version == "" {
+		return nil, fmt.Errorf("version is required")
+	}
+	if signatureBase64 == "" {
+		return nil, fmt.Errorf("signature_base64 is required")
+	}
+	if packageBytesBase64 == "" {
+		return nil, fmt.Errorf("package_bytes_base64 is required")
+	}
+
+	publish, err := bridge.PublishCapabilityWithRequest(handle, PublishCapabilityRequest{
+		TenantID:           tenant,
+		PackageID:          packageID,
+		CapabilityName:     capabilityName,
+		Version:            version,
+		Digest:             digest,
+		SignatureBase64:    signatureBase64,
+		Tags:               tags,
+		Requirements:       map[string]string{},
+		Metadata:           metadata,
+		PackageBytesBase64: packageBytesBase64,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	publishDigest := digest
+	if rawRef, ok := publish["package_ref"].(map[string]any); ok {
+		if rawDigest, ok := rawRef["digest"]; ok {
+			if maybe := strings.TrimSpace(fmt.Sprint(rawDigest)); maybe != "" {
+				publishDigest = maybe
 			}
 		}
 	}
-	return bridge.DeployMCPListDirWithRequest(handle, DeployMCPListDirRequest{
-		TenantID:        tenant,
-		NodeID:          nodeId,
-		TargetPath:      toolName,
-		CommandTemplate: cmdTemplate,
-		CapabilityName:  abilityName,
-		ToolName:        toolName,
-		Version:         version,
-		SignatureBase64: sig,
-		InputSchema:     inputSchema,
-		OutputSchema:    outputSchema,
-		Tags:            tags,
+
+	install, err := bridge.InstallCapabilityWithRequest(handle, InstallCapabilityRequest{
+		TenantID:              tenant,
+		NodeID:                nodeId,
+		PackageID:             packageID,
+		Version:               version,
+		Digest:                publishDigest,
+		RequireConsent:        BoolPtr(false),
+		AllowTransferredCode:  BoolPtr(true),
+		ExecutionMode:         DefaultExecutionMode,
+		InstallTimeoutSeconds: IntPtr(45),
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	installID := strings.TrimSpace(fmt.Sprint(install["install_id"]))
+	if installID == "" {
+		return nil, fmt.Errorf("deploy_ability_package missing install_id after install")
+	}
+	activate, err := bridge.ActivateCapability(handle, tenant, nodeId, installID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := map[string]any{
+		"ok":              true,
+		"package_id":      packageID,
+		"capability_name": capabilityName,
+		"publish":         publish,
+		"install":         install,
+		"activate":        activate,
+		"install_id":      installID,
+		"package":         pkg,
+	}
+	if toolName := stringFromAbilityArg(pkg["tool_name"]); toolName != "" {
+		result["tool_name"] = toolName
+	}
+	return result, nil
+}
+
+func mustJSONMarshal(value any) []byte {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return []byte("null")
+	}
+	return encoded
 }
 
 // ---------------------------------------------------------------------------
@@ -732,13 +1002,13 @@ func federationSpawnEnv(hub, hubTenant, hubLabel, hubJoinToken string) []string 
 
 // StartServerOptions configures local runtime bootstrap and federation join behavior.
 type StartServerOptions struct {
-	Endpoint  string
-	LogFile   string
-	Insecure  *bool
-	Timeout   time.Duration
-	Hub       string
-	HubTenant string
-	HubLabel  string
+	Endpoint     string
+	LogFile      string
+	Insecure     *bool
+	Timeout      time.Duration
+	Hub          string
+	HubTenant    string
+	HubLabel     string
 	HubJoinToken string
 }
 
@@ -859,7 +1129,24 @@ func StartServerWithOptions(options StartServerOptions) (*ServerHandle, error) {
 	}, nil
 }
 
-func generateInvokeScript(resourceURI, endpoint string) string {
+var shellUnsafeRe = regexp.MustCompile("[`$\\\\\"'\\n\\r;|&<>(){}!#\\x00-\\x1f]")
+
+func sanitizeShellValue(value, label string) (string, error) {
+	if shellUnsafeRe.MatchString(value) {
+		return "", fmt.Errorf("%s contains disallowed shell characters: %s", label, value)
+	}
+	return value, nil
+}
+
+func generateInvokeScript(resourceURI, endpoint string) (string, error) {
+	safeEP, err := sanitizeShellValue(endpoint, "endpoint")
+	if err != nil {
+		return "", err
+	}
+	safeURI, err := sanitizeShellValue(resourceURI, "resource_uri")
+	if err != nil {
+		return "", err
+	}
 	return fmt.Sprintf(`#!/usr/bin/env bash
 set -euo pipefail
 AXON_ENDPOINT="${AXON_ENDPOINT:-%s}"
@@ -869,7 +1156,7 @@ ARGS="${1:-{}}"
 curl -sS -X POST "${AXON_ENDPOINT}/v1/invoke" \
   -H "Content-Type: application/json" \
   -d "{\"tenant_id\":\"${TENANT}\",\"resource_uri\":\"${RESOURCE_URI}\",\"payload\":${ARGS}}"
-`, endpoint, resourceURI)
+`, safeEP, safeURI), nil
 }
 
 func pushMetadata(b *strings.Builder, version, resourceURI string) {
@@ -901,6 +1188,20 @@ func generateAbilityMd(descriptor *AbilityDescriptor, target AbilityTarget, toke
 	b.WriteString("---\n\n")
 	fmt.Fprintf(&b, "# %s\n\n", descriptor.Name)
 	fmt.Fprintf(&b, "%s\n\n", descriptor.Description)
+
+	// Agent extension: instructions
+	if descriptor.Instructions != "" {
+		fmt.Fprintf(&b, "%s\n\n", descriptor.Instructions)
+	}
+	// Agent extension: prerequisites
+	if len(descriptor.Prerequisites) > 0 {
+		b.WriteString("## Prerequisites\n\n")
+		for _, p := range descriptor.Prerequisites {
+			fmt.Fprintf(&b, "- %s\n", p)
+		}
+		b.WriteString("\n")
+	}
+
 	b.WriteString("## Parameters\n\n")
 	b.WriteString("| Name | Type | Required | Description |\n")
 	b.WriteString("|------|------|----------|-------------|\n")
@@ -929,6 +1230,29 @@ func generateAbilityMd(descriptor *AbilityDescriptor, target AbilityTarget, toke
 		}
 	}
 
+	// Agent extension: examples
+	if len(descriptor.InputExamples) > 0 {
+		b.WriteString("\n## Examples\n\n")
+		for i, ex := range descriptor.InputExamples {
+			fmt.Fprintf(&b, "**Example %d:**\n\n", i+1)
+			b.WriteString("```json\n")
+			if encoded, err := json.Marshal(ex); err == nil {
+				b.Write(encoded)
+			}
+			b.WriteString("\n```\n\n")
+		}
+	}
+	// Agent extension: context bindings
+	if len(descriptor.ContextBindings) > 0 {
+		b.WriteString("## Context Bindings\n\n")
+		b.WriteString("| Key | Value |\n")
+		b.WriteString("|-----|-------|\n")
+		for k, v := range descriptor.ContextBindings {
+			fmt.Fprintf(&b, "| `%s` | %s |\n", k, v)
+		}
+		b.WriteString("\n")
+	}
+
 	b.WriteString("\n## Invoke\n\n")
 	b.WriteString("Run the bundled script with a JSON argument:\n\n")
 	skillDirVar := "SKILL_DIR"
@@ -944,6 +1268,9 @@ func generateAbilityMd(descriptor *AbilityDescriptor, target AbilityTarget, toke
 	b.WriteString("## Axon Resource\n\n")
 	fmt.Fprintf(&b, "- **URI**: `%s`\n", descriptor.ResourceURI)
 	fmt.Fprintf(&b, "- **Version**: %s\n", descriptor.Version)
+	if descriptor.Category != "" {
+		fmt.Fprintf(&b, "- **Category**: %s\n", descriptor.Category)
+	}
 
 	return b.String()
 }

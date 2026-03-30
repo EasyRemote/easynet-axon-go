@@ -2,7 +2,22 @@
 // =========================
 //
 // File: sdk/go/easynet/presets/remote_control/descriptor.go
-// Description: Skill package descriptor: build, parse, and serialize for MCP deployment.
+// Description: Go remote-control ability package descriptor builders and parsers for MCP deployment flows.
+//
+// Protocol Responsibility:
+// - Encodes and decodes portable ability package payloads used by remote-control deploy/package tool flows.
+// - Normalizes package, capability, tool, metadata, and signature fields before bridge/orchestrator calls.
+//
+// Implementation Approach:
+// - Keeps parsing, sanitization, and default generation close to descriptor construction helpers.
+// - Uses deterministic identifier/version/tag normalization so packaged abilities round-trip across SDKs.
+//
+// Usage Contract:
+// - Callers must pass descriptor inputs that can be losslessly represented as JSON-compatible values.
+// - Update descriptor rules here before changing remote-control packaging semantics elsewhere.
+//
+// Architectural Position:
+// - Shared descriptor translation layer for the remote-control preset and ability-lifecycle integrations.
 //
 // Author: Silan.Hu
 // Email: silan.hu@u.nus.edu
@@ -29,7 +44,7 @@ type AbilityPackageDescriptor struct {
 	Version         string
 	Tags            []string
 	Metadata        map[string]string
-	SignatureBase64  string
+	SignatureBase64 string
 	PackageBytes    string
 	Digest          string
 }
@@ -37,14 +52,14 @@ type AbilityPackageDescriptor struct {
 func (d AbilityPackageDescriptor) toToolPayload() map[string]any {
 	out := map[string]any{
 		"ability_name":         d.AbilityName,
-		"package_id":         d.PackageID,
-		"capability_name":    d.CapabilityName,
-		"tool_name":          d.ToolName,
-		"description":        d.Description,
-		"version":            d.Version,
-		"tags":               d.Tags,
-		"metadata":           d.Metadata,
-		"signature_base64":   d.SignatureBase64,
+		"package_id":           d.PackageID,
+		"capability_name":      d.CapabilityName,
+		"tool_name":            d.ToolName,
+		"description":          d.Description,
+		"version":              d.Version,
+		"tags":                 d.Tags,
+		"metadata":             d.Metadata,
+		"signature_base64":     d.SignatureBase64,
 		"package_bytes_base64": d.PackageBytes,
 	}
 	if d.Digest != "" {
@@ -62,9 +77,9 @@ func (d AbilityPackageDescriptor) toDeployDescriptor() easynet.DeployAbilityPack
 		SignatureBase64:    d.SignatureBase64,
 		Tags:               d.Tags,
 		Metadata:           d.Metadata,
-		PackageBytesBase64:  d.PackageBytes,
-		InstallTimeoutSec:   defaultInstallTimeoutSeconds,
-		ExecutionMode:       defaultExecutionMode,
+		PackageBytesBase64: d.PackageBytes,
+		InstallTimeoutSec:  defaultInstallTimeoutSeconds,
+		ExecutionMode:      defaultExecutionMode,
 	}
 }
 
@@ -88,17 +103,17 @@ func parseDescriptor(raw any) (AbilityPackageDescriptor, error) {
 		}
 	}
 	return AbilityPackageDescriptor{
-		AbilityName:    asString(obj["ability_name"]),
-		PackageID:      asString(obj["package_id"]),
-		CapabilityName: asString(obj["capability_name"]),
-		ToolName:       asString(obj["tool_name"]),
-		Description:    asString(obj["description"]),
-		Version:        asString(obj["version"]),
-		Tags:           normalizeTags(obj["tags"], []string{"mcp", "ability", "gallery"}),
-		Metadata:       metadata,
+		AbilityName:     asString(obj["ability_name"]),
+		PackageID:       asString(obj["package_id"]),
+		CapabilityName:  asString(obj["capability_name"]),
+		ToolName:        asString(obj["tool_name"]),
+		Description:     asString(obj["description"]),
+		Version:         asString(obj["version"]),
+		Tags:            normalizeTags(obj["tags"], []string{"mcp", "ability", "gallery"}),
+		Metadata:        metadata,
 		SignatureBase64: asString(obj["signature_base64"]),
-		PackageBytes:   asString(obj["package_bytes_base64"]),
-		Digest:         asString(obj["digest"]),
+		PackageBytes:    asString(obj["package_bytes_base64"]),
+		Digest:          asString(obj["digest"]),
 	}, nil
 }
 
@@ -120,7 +135,10 @@ func buildDescriptor(args map[string]any, fallbackSignature string) (AbilityPack
 	}
 
 	now := time.Now().UnixMilli()
-	token := sanitizeIDFragment(abilityName)
+	token, err := sanitizeIDFragment(abilityName)
+	if err != nil {
+		return AbilityPackageDescriptor{}, fmt.Errorf("invalid ability_name: %w", err)
+	}
 	version := asStringOrDefault(args["version"], defaultVersion)
 	toolName := asStringOrDefault(args["tool_name"], fmt.Sprintf("ability_%s", token))
 	packageID := asStringOrDefault(args["package_id"], fmt.Sprintf("pkg.ability.%s.%d", token, now))
@@ -148,9 +166,36 @@ func buildDescriptor(args map[string]any, fallbackSignature string) (AbilityPack
 		"ability.name":      abilityName,
 		"ability.version":   version,
 	}
+	if v := asString(args["instructions"]); v != "" {
+		metadata["mcp.instructions"] = v
+	}
+	if arr, ok := args["input_examples"].([]any); ok && len(arr) > 0 {
+		if encoded, err := json.Marshal(arr); err == nil {
+			metadata["mcp.input_examples"] = string(encoded)
+		}
+	}
+	if arr, ok := args["prerequisites"].([]any); ok && len(arr) > 0 {
+		parts := make([]string, 0, len(arr))
+		for _, item := range arr {
+			if s := asString(item); s != "" {
+				parts = append(parts, s)
+			}
+		}
+		if len(parts) > 0 {
+			if encoded, err := json.Marshal(parts); err == nil {
+				metadata["mcp.prerequisites"] = string(encoded)
+			}
+		}
+	}
+	if obj := asMap(args["context_bindings"]); len(obj) > 0 {
+		metadata["mcp.context_bindings"] = toJSON(obj)
+	}
+	if v := asString(args["category"]); v != "" {
+		metadata["mcp.category"] = v
+	}
 	packagePayload := map[string]any{
 		"kind":               "axon.ability.package.v1",
-		"ability_name":         abilityName,
+		"ability_name":       abilityName,
 		"package_id":         packageID,
 		"capability_name":    capabilityName,
 		"tool_name":          toolName,
@@ -166,17 +211,17 @@ func buildDescriptor(args map[string]any, fallbackSignature string) (AbilityPack
 		return AbilityPackageDescriptor{}, fmt.Errorf("invalid package payload: %w", err)
 	}
 	return AbilityPackageDescriptor{
-		AbilityName:    abilityName,
-		PackageID:      packageID,
-		CapabilityName: capabilityName,
-		ToolName:       toolName,
-		Description:    description,
-		Version:        version,
-		Tags:           normalizeTags(args["tags"], []string{"mcp", "ability", "gallery"}),
-		Metadata:       metadata,
+		AbilityName:     abilityName,
+		PackageID:       packageID,
+		CapabilityName:  capabilityName,
+		ToolName:        toolName,
+		Description:     description,
+		Version:         version,
+		Tags:            normalizeTags(args["tags"], []string{"mcp", "ability", "gallery"}),
+		Metadata:        metadata,
 		SignatureBase64: signature,
-		PackageBytes:   base64.StdEncoding.EncodeToString(raw),
-		Digest:         asString(args["digest"]),
+		PackageBytes:    base64.StdEncoding.EncodeToString(raw),
+		Digest:          asString(args["digest"]),
 	}, nil
 }
 
@@ -201,6 +246,7 @@ func defaultOutputSchema() map[string]any {
 				"items": map[string]any{"type": "string"},
 			},
 		},
+		"required": []string{"entries"},
 	}
 }
 

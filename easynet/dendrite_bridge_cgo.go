@@ -105,6 +105,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"unsafe"
@@ -224,6 +225,180 @@ func resolveDeploySignatureBase64(signatureBase64 string) (string, error) {
 	)
 }
 
+func sdkVersionCandidates() []string {
+	versions := make([]string, 0, 3)
+	if raw := strings.TrimSpace(os.Getenv("SDK_VERSION")); raw != "" {
+		versions = append(versions, raw)
+	}
+	if root, err := projectRoot(); err == nil {
+		versionFile := filepath.Join(root, "VERSION")
+		if raw, err := os.ReadFile(versionFile); err == nil {
+			if parsed := strings.TrimSpace(string(raw)); parsed != "" {
+				versions = append(versions, strings.Split(parsed, "\n")[0])
+			}
+		}
+	}
+	if len(versions) == 0 {
+		if strings.TrimSpace(os.Getenv("EASYNET_DENDRITE_BRIDGE_DEBUG")) == "1" {
+			fmt.Fprintln(os.Stderr, "warning: no SDK_VERSION or VERSION file found, falling back to 0.1.0")
+		}
+	}
+	versions = append(versions, "0.1.0")
+	return dedupeStrings(versions)
+}
+
+func libraryFileNames() []string {
+	hint := strings.TrimSpace(strings.ToLower(os.Getenv("EASYNET_DENDRITE_BRIDGE_PLATFORM")))
+	switch hint {
+	case "ios":
+		return []string{"libaxon_dendrite_bridge.dylib", "libaxon_dendrite_bridge.so", "axon_dendrite_bridge.dll"}
+	case "android", "linux", "linux-gnu":
+		return []string{"libaxon_dendrite_bridge.so", "libaxon_dendrite_bridge.dylib", "axon_dendrite_bridge.dll"}
+	case "macos", "darwin", "mac":
+		return []string{"libaxon_dendrite_bridge.dylib", "libaxon_dendrite_bridge.so", "axon_dendrite_bridge.dll"}
+	case "windows", "win", "win32", "win64":
+		return []string{"axon_dendrite_bridge.dll", "libaxon_dendrite_bridge.dylib", "libaxon_dendrite_bridge.so"}
+	default:
+		primary := "libaxon_dendrite_bridge.so"
+		if strings.HasPrefix(strings.ToLower(runtime.GOOS), "darwin") {
+			primary = "libaxon_dendrite_bridge.dylib"
+		} else if strings.HasPrefix(strings.ToLower(runtime.GOOS), "windows") {
+			primary = "axon_dendrite_bridge.dll"
+		}
+		return dedupeStrings([]string{
+			primary,
+			"libaxon_dendrite_bridge.dylib",
+			"libaxon_dendrite_bridge.so",
+			"axon_dendrite_bridge.dll",
+		})
+	}
+}
+
+func dedupeStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func projectRoot() (string, error) {
+	cursor, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	cursor = filepath.Clean(cursor)
+	for range 12 {
+		if _, err := os.Stat(filepath.Join(cursor, "core", "runtime-rs")); err == nil {
+			return cursor, nil
+		}
+		parent := filepath.Dir(cursor)
+		if parent == cursor {
+			break
+		}
+		cursor = parent
+	}
+	return "", errors.New("project root not found")
+}
+
+func addLibraryCandidates(results *[]string, names []string, dirs ...string) {
+	for _, dir := range dirs {
+		for _, name := range names {
+			*results = append(*results, filepath.Join(dir, name))
+		}
+	}
+}
+
+func useLocalSource() bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv("EASYNET_DENDRITE_BRIDGE_SOURCE")))
+	switch raw {
+	case "1", "true", "yes", "on", "local", "source":
+		return true
+	default:
+		return false
+	}
+}
+
+func homeLibraryCandidates(home string, names []string, versions []string) []string {
+	if strings.TrimSpace(home) == "" {
+		return nil
+	}
+	homeRoot := filepath.Clean(home)
+	candidates := make([]string, 0, 32)
+	dirs := []string{
+		homeRoot,
+		filepath.Join(homeRoot, "native"),
+	}
+	for _, version := range versions {
+		dirs = append(dirs, filepath.Join(homeRoot, "dist", "sdk-packs", version, "native"))
+	}
+	addLibraryCandidates(&candidates, names, dirs...)
+	return dedupeStrings(candidates)
+}
+
+func sourceLibraryCandidates(names []string, versions []string) []string {
+	if !useLocalSource() {
+		return nil
+	}
+	root, err := projectRoot()
+	if err != nil {
+		return nil
+	}
+	candidates := make([]string, 0, 24)
+	for _, version := range versions {
+		addLibraryCandidates(&candidates, names, filepath.Join(root, "dist", "sdk-packs", version, "native"))
+	}
+	target := strings.TrimSpace(os.Getenv("SDK_TARGET"))
+	releaseRoot := filepath.Join(root, "core", "runtime-rs", "dendrite-bridge", "target", "release")
+	debugRoot := filepath.Join(root, "core", "runtime-rs", "dendrite-bridge", "target", "debug")
+	addLibraryCandidates(&candidates, names, releaseRoot, debugRoot)
+	if target != "" {
+		addLibraryCandidates(
+			&candidates,
+			names,
+			filepath.Join(root, "core", "runtime-rs", "dendrite-bridge", "target", target, "release"),
+			filepath.Join(root, "core", "runtime-rs", "dendrite-bridge", "target", target, "debug"),
+		)
+	}
+	return dedupeStrings(candidates)
+}
+
+func packageLibraryCandidates(names []string, versions []string) []string {
+	here, err := os.Getwd()
+	if err != nil {
+		here = "."
+	}
+	here = filepath.Clean(here)
+	candidates := make([]string, 0, 32)
+	dirs := []string{
+		here,
+		filepath.Join(here, "native"),
+	}
+	for _, version := range versions {
+		dirs = append(dirs, filepath.Join(here, "dist", "sdk-packs", version, "native"))
+	}
+	addLibraryCandidates(&candidates, names, dirs...)
+	return dedupeStrings(candidates)
+}
+
+func bridgeDebugLog(tried []string) {
+	if strings.TrimSpace(os.Getenv("EASYNET_DENDRITE_BRIDGE_DEBUG")) != "1" {
+		return
+	}
+	fmt.Fprintln(os.Stderr, "dendrite bridge: tried candidates:")
+	for _, p := range tried {
+		fmt.Fprintf(os.Stderr, "  - %s\n", p)
+	}
+}
+
 func ResolveDendriteLibraryPath(explicitPath string) (string, error) {
 	if explicitPath != "" {
 		return explicitPath, nil
@@ -231,35 +406,29 @@ func ResolveDendriteLibraryPath(explicitPath string) (string, error) {
 	if env := os.Getenv("EASYNET_DENDRITE_BRIDGE_LIB"); env != "" {
 		return env, nil
 	}
-	candidates := []string{
-		"./native/libaxon_dendrite_bridge.dylib",
-		"./native/libaxon_dendrite_bridge.so",
-		"./native/axon_dendrite_bridge.dll",
-		"libaxon_dendrite_bridge.dylib",
-		"libaxon_dendrite_bridge.so",
-		"axon_dendrite_bridge.dll",
-	}
-	for _, c := range candidates {
+	names := libraryFileNames()
+	versions := sdkVersionCandidates()
+	var tried []string
+	for _, c := range homeLibraryCandidates(os.Getenv("EASYNET_DENDRITE_BRIDGE_HOME"), names, versions) {
+		tried = append(tried, c)
 		if _, err := os.Stat(c); err == nil {
 			return c, nil
 		}
 	}
-
-	exe, err := os.Executable()
-	if err == nil {
-		exeDir := filepath.Dir(exe)
-		for _, c := range []string{
-			filepath.Join(exeDir, "native", "libaxon_dendrite_bridge.dylib"),
-			filepath.Join(exeDir, "native", "libaxon_dendrite_bridge.so"),
-			filepath.Join(exeDir, "native", "axon_dendrite_bridge.dll"),
-		} {
-			if _, statErr := os.Stat(c); statErr == nil {
-				return c, nil
-			}
+	for _, c := range sourceLibraryCandidates(names, versions) {
+		tried = append(tried, c)
+		if _, err := os.Stat(c); err == nil {
+			return c, nil
 		}
 	}
-
-	return "", DendriteError{Message: "dendrite bridge library not found; set EASYNET_DENDRITE_BRIDGE_LIB or pass explicit path"}
+	for _, c := range packageLibraryCandidates(names, versions) {
+		tried = append(tried, c)
+		if _, err := os.Stat(c); err == nil {
+			return c, nil
+		}
+	}
+	bridgeDebugLog(tried)
+	return "", DendriteError{Message: "dendrite bridge library not found; set EASYNET_DENDRITE_BRIDGE_LIB or EASYNET_DENDRITE_BRIDGE_HOME — run with EASYNET_DENDRITE_BRIDGE_DEBUG=1 for candidate details"}
 }
 
 func OpenDendriteBridge(libPath string) (*DendriteBridge, error) {

@@ -33,6 +33,22 @@ The SDK ships a native Dendrite bridge binary (loaded via cgo + `dlopen`/`dlsym`
 go get easynet.run/axon/sdk/go
 ```
 
+## Platform / Native Bundle Notes
+
+- The Go module release (`easynet.run/axon/sdk/go`) is source-first and can be fetched regardless of host.
+- Native + runtime payload for deployed targets is distributed via GitHub Release SDK-pack artifacts, not always inside the module tarball itself.
+- If building or testing on another target than your host:
+  - download the matching `sdk-packs-<target>.tar.gz` from Releases
+  - extract `go/` and align your runtime dependency/runtime files with that pack.
+  - optional: `SDK_VERSION=<version>` (resolver checks explicit version first, then fallback)
+  - set `EASYNET_DENDRITE_BRIDGE_PLATFORM=ios|android|linux|windows|macos`.
+  - set `EASYNET_DENDRITE_BRIDGE_LIB=/abs/path/to/libaxon_dendrite_bridge.<ext>` when you want fully explicit binding.
+  - set `EASYNET_DENDRITE_BRIDGE_HOME=<pack-root>` (directory containing `native/`) to reuse one extracted target pack across tools.
+  - set `EASYNET_DENDRITE_BRIDGE_SOURCE=local` to let source-presets auto-detect local `core/runtime-rs` artifacts in repository checkouts.
+- If building from repo source for target-specific output:
+  - set `SDK_TARGET` + `SDK_LIB_EXT` in packaging scripts and install from that pack.
+  - set `SDK_VERSION=<version>` and `EASYNET_DENDRITE_BRIDGE_SOURCE=local` when you want source-tree probing first.
+
 ## Quick Start
 
 ### Expose an ability
@@ -86,7 +102,7 @@ No public IP required — the local runtime connects outbound to the Hub.
 
 Full lifecycle management — not just invocation:
 
-- `CreateAbility()` / `ExportAbility()` — define and register abilities with schemas
+- `BuildAbilityDescriptor()` / `ExportAbility()` — define and register abilities with schemas
 - `DeployToNode()` — install + activate on target nodes
 - `ListAbilities()` / `InvokeAbility()` / `UninstallAbility()`
 - `DiscoverNodes()` / `ExecuteCommand()` / `DisconnectDevice()` / `DrainDevice()`
@@ -127,6 +143,7 @@ lifecycle, _ := orch.PublishInstallActivate(
 
 - `StartServerWithOptions()` spawns a local Axon runtime and joins the Hub — all traffic is outbound.
 - Federated node discovery and cross-network invocation dispatch.
+- Preset status: the high-level federation preset helper is currently Python-only; Go exposes the runtime bootstrap and federation transport surfaces directly.
 
 ## License
 

@@ -15,10 +15,10 @@ import (
 	"encoding/hex"
 	"io"
 	"os"
-	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
+
+	"easynet.run/axon/sdk/go/easynet"
 )
 
 const (
@@ -58,31 +58,21 @@ func EnsureNativeLibEnv() {
 	if strings.TrimSpace(os.Getenv("EASYNET_DENDRITE_BRIDGE_LIB")) != "" {
 		return
 	}
-	candidates := []string{
-		filepath.Join("core", "runtime-rs", "dendrite-bridge", "target", "release", defaultBridgeLibName()),
-		filepath.Join("..", "..", "..", "..", "..", "core", "runtime-rs", "dendrite-bridge", "target", "release", defaultBridgeLibName()),
+	if resolved := resolveNativeLibraryPath(); resolved != "" {
+		_ = os.Setenv("EASYNET_DENDRITE_BRIDGE_LIB", resolved)
 	}
-	for _, candidate := range candidates {
-		if isPathToFile(candidate) {
-			_ = os.Setenv("EASYNET_DENDRITE_BRIDGE_LIB", candidate)
-			return
-		}
+}
+
+func resolveNativeLibraryPath() string {
+	resolved, err := easynet.ResolveDendriteLibraryPath("")
+	if err != nil {
+		return ""
 	}
+	return resolved
 }
 
 func EnsureNativeBridgeEnv() {
 	EnsureNativeLibEnv()
-}
-
-func defaultBridgeLibName() string {
-	switch runtime.GOOS {
-	case "darwin":
-		return "libaxon_dendrite_bridge.dylib"
-	case "windows":
-		return "axon_dendrite_bridge.dll"
-	default:
-		return "libaxon_dendrite_bridge.so"
-	}
 }
 
 func parsePositiveIntOrFallback(raw string, fallback int) int {
@@ -98,11 +88,6 @@ func envOr(key, fallback string) string {
 		return value
 	}
 	return fallback
-}
-
-func isPathToFile(raw string) bool {
-	info, err := os.Stat(raw)
-	return err == nil && !info.IsDir()
 }
 
 func randomHex(length int) string {
