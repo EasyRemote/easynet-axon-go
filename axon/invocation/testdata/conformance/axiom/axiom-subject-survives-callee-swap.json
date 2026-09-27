@@ -1,0 +1,66 @@
+{
+  "id": "axiom-subject-survives-callee-swap",
+  "rfc": "001",
+  "severity": "critical",
+  "invariant": "INV-7",
+  "title": "two invocations on the same subject with structurally different callees both verify; subject_binding is byte-identical across them",
+  "description": "The §1.3 aha-demo vector: invocation A on subject paper@draft-1 is dispatched to pool-a/writer; pool-a dies; invocation B on the SAME subject URA is dispatched to pool-b/writer. Both receipts carry byte-identical subject_binding and legitimately different callee_binding. HTTP would require a 3xx redirect; Axon does not. This vector pins that the axiom encoder does not reorder or collapse these fields.",
+  "inputs_a": {
+    "caller": {
+      "ura": "easynet:///r/silan/agent/silan.dispatcher",
+      "profile": "axon-strict-v2"
+    },
+    "callee": {
+      "ura": "easynet:///r/silan/agent/silan.writer-a",
+      "profile": "axon-strict-v2"
+    },
+    "subject": {
+      "ura": "easynet:///r/silan/resource/silan.papers/paper-draft-1",
+      "profile": "axon-strict-v2"
+    },
+    "ability": "easynet:///r/silan/ability/silan.writer.draft@1.0.0#eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee!invoke",
+    "args_digest_hex": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "invocation_nonce_hex": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "causal_context": {
+      "form": "none"
+    }
+  },
+  "inputs_b": {
+    "caller": {
+      "ura": "easynet:///r/silan/agent/silan.dispatcher",
+      "profile": "axon-strict-v2"
+    },
+    "callee": {
+      "ura": "easynet:///r/silan/agent/silan.writer-b",
+      "profile": "axon-strict-v2"
+    },
+    "subject": {
+      "ura": "easynet:///r/silan/resource/silan.papers/paper-draft-1",
+      "profile": "axon-strict-v2"
+    },
+    "ability": "easynet:///r/silan/ability/silan.writer.draft@1.0.0#eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee!invoke",
+    "args_digest_hex": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "invocation_nonce_hex": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "causal_context": {
+      "form": "scalar",
+      "receipt_hash_hex": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "receipt_ura": "easynet:///r/silan/receipts/partial-from-pool-a"
+    }
+  },
+  "expect": {
+    "subject_bytes_identical_across_a_and_b": true,
+    "callee_bytes_differ_across_a_and_b": true,
+    "canonical_a_equals_canonical_b": false
+  },
+  "consumers": {
+    "required_test_files": [
+      "sdk/rust/tests/axiom_vectors.rs",
+      "sdk/go/axon/invocation/axiom_vectors_test.go",
+      "sdk/node/tests/axiom-vectors.test.mjs",
+      "sdk/python/tests/test_axiom_vectors.py",
+      "sdk/java/src/test/java/run/axon/sdk/invocation/AxiomVectorsTest.java",
+      "sdk/swift/Tests/AxonSDKTests/AxiomVectorsTests.swift"
+    ],
+    "loader_rule": "This critical vector is not optional. The listed tests are the release-blocking consumers for the contract pinned here."
+  }
+}

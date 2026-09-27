@@ -1,0 +1,14 @@
+{
+  "id": "axiom-e5-causal-none-root",
+  "rfc": "001",
+  "severity": "major",
+  "invariant": "INV-3",
+  "title": "root invocation uses causal_context.none (single byte 0x00)",
+  "inputs": {
+    "causal_context": { "form": "none" }
+  },
+  "expect": {
+    "canonical_causal_bytes_hex": "00",
+    "canonical_causal_length": 1
+  }
+}

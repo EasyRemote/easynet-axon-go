@@ -1,0 +1,62 @@
+{
+  "id": "axiom-identity-composite-required",
+  "rfc": "001",
+  "severity": "critical",
+  "invariant": "INV-4",
+  "title": "identity fields are composite (URA + profile), not raw strings",
+  "description": "Two envelopes with byte-identical URAs but different profiles must produce different canonical bytes — the profile is part of the identity block per §4.1. This is the anti-profile-confusion vector called out in §11 D-series: an implementation that strips the profile when hashing is non-conformant.",
+  "inputs_strict": {
+    "caller": {
+      "ura": "easynet:///r/silan/agent/silan.q",
+      "profile": "axon-strict-v2"
+    },
+    "callee": {
+      "ura": "easynet:///r/openai/agent/openai.q",
+      "profile": "axon-strict-v2"
+    },
+    "subject": {
+      "ura": "easynet:///r/silan/agent/silan.q",
+      "profile": "axon-strict-v2"
+    },
+    "ability": "easynet:///r/openai/ability/openai.agent.echo@1.0.0#bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb!invoke",
+    "args_digest_hex": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "invocation_nonce_hex": "dddddddddddddddddddddddddddddddd",
+    "causal_context": {
+      "form": "none"
+    }
+  },
+  "inputs_websafe": {
+    "caller": {
+      "ura": "easynet:///r/silan/agent/silan.q",
+      "profile": "web-safe-v2"
+    },
+    "callee": {
+      "ura": "easynet:///r/openai/agent/openai.q",
+      "profile": "axon-strict-v2"
+    },
+    "subject": {
+      "ura": "easynet:///r/silan/agent/silan.q",
+      "profile": "axon-strict-v2"
+    },
+    "ability": "easynet:///r/openai/ability/openai.agent.echo@1.0.0#bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb!invoke",
+    "args_digest_hex": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "invocation_nonce_hex": "dddddddddddddddddddddddddddddddd",
+    "causal_context": {
+      "form": "none"
+    }
+  },
+  "expect": {
+    "canonical_strict_equals_canonical_websafe": false
+  },
+  "consumers": {
+    "required_test_files": [
+      "sdk/rust/tests/axiom_vectors.rs",
+      "sdk/go/axon/invocation/axiom_vectors_test.go",
+      "sdk/node/tests/axiom-vectors.test.mjs",
+      "sdk/python/tests/test_axiom_vectors.py",
+      "sdk/java/src/test/java/run/axon/sdk/invocation/AxiomVectorsTest.java",
+      "sdk/swift/Tests/AxonSDKTests/AxiomVectorsTests.swift"
+    ],
+    "loader_rule": "This critical vector is not optional. The listed tests are the release-blocking consumers for the contract pinned here."
+  }
+}

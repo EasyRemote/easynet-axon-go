@@ -1,0 +1,19 @@
+{
+  "id": "axiom-e6-causal-scalar",
+  "rfc": "001",
+  "severity": "major",
+  "invariant": "INV-3",
+  "title": "scalar causal_context encodes tag 0x01 || receipt_hash(32) || len(ura) || ura",
+  "description": "Per RFC 001 §4.2: scalar causal_context emits a 0x01 discriminator byte, the 32-byte predecessor receipt hash, a 4-byte big-endian URA length, and the URA bytes.",
+  "inputs": {
+    "causal_context": {
+      "form": "scalar",
+      "receipt_hash_hex": "abababababababababababababababababababababababababababababababab",
+      "receipt_ura": "easynet:///r/silan/receipts/r1"
+    }
+  },
+  "expect": {
+    "canonical_causal_first_byte_hex": "01",
+    "canonical_causal_bytes_start_with": "01abababababababababababababababababababababababababababababababab"
+  }
+}

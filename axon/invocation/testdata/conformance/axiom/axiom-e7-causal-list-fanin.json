@@ -1,0 +1,30 @@
+{
+  "id": "axiom-e7-causal-list-fanin",
+  "rfc": "001",
+  "severity": "major",
+  "invariant": "INV-3",
+  "title": "list causal_context preserves caller-asserted order and binds into canonical bytes",
+  "description": "Fan-in join references a bounded number of predecessor receipts. The order is caller-asserted and MUST NOT be reordered by the runtime. Swapping two entries produces distinct canonical bytes.",
+  "inputs_a": {
+    "causal_context": {
+      "form": "list",
+      "prior": [
+        { "receipt_hash_hex": "1111111111111111111111111111111111111111111111111111111111111111", "receipt_ura": "u1" },
+        { "receipt_hash_hex": "2222222222222222222222222222222222222222222222222222222222222222", "receipt_ura": "u2" }
+      ]
+    }
+  },
+  "inputs_b": {
+    "causal_context": {
+      "form": "list",
+      "prior": [
+        { "receipt_hash_hex": "2222222222222222222222222222222222222222222222222222222222222222", "receipt_ura": "u2" },
+        { "receipt_hash_hex": "1111111111111111111111111111111111111111111111111111111111111111", "receipt_ura": "u1" }
+      ]
+    }
+  },
+  "expect": {
+    "canonical_a_equals_canonical_b": false,
+    "canonical_a_first_byte_hex": "02"
+  }
+}

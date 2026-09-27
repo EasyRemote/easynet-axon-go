@@ -1,0 +1,93 @@
+{
+  "id": "axiom-worked-example-authenticated",
+  "rfc": "001",
+  "spec_section": "core/runtime-rs/dendrite-bridge/docs/AUTHENTICATED_INVOCATION.md#413-worked-signing-example-normative-reference-vector",
+  "severity": "critical",
+
+  "title": "Frozen worked example — six-language parity anchor for authenticated invocation (RFC 001 §5.1)",
+
+  "description": "This vector is the single source of truth for cross-SDK authenticated-invocation parity. It pins the DESCRIPTOR-BOUND canonical invocation bytes — the admission/proof boundary. `ability` is an AbilityDescriptorRef (`ability_ura@version#descriptor_hash!action`) and `subject` is normalized to an EntityRef inside the canonical encoding. Every SDK's worked-example test MUST load this file, run its descriptor-bound encoder/signer (canonical_descriptor_bound_invocation_bytes + sign_descriptor_bound_invocation), and assert against these values. Retired plain invocation bytes are NOT the proof boundary and are not pinned here. No SDK is permitted to hard-code these values in test code. Any change that alters `expected` values is a spec change — stop, amend the RFC, regenerate from the Rust reference (`sdk/rust/examples/emit_worked_example.rs`), update this file, update AUTHENTICATED_INVOCATION.md §4.1.3, commit all three together.",
+
+  "inputs": {
+    "signing_seed_hex": "0101010101010101010101010101010101010101010101010101010101010101",
+    "caller": {
+      "ura": "easynet:///r/silan/agent/silan.alice",
+      "profile": "axon-strict-v2"
+    },
+    "callee": {
+      "ura": "easynet:///r/openai/agent/openai.reviewer",
+      "profile": "axon-strict-v2"
+    },
+    "subject": {
+      "ura": "easynet:///r/silan/resource/silan.papers/paper",
+      "profile": "axon-strict-v2"
+    },
+    "ability": "easynet:///r/openai/ability/openai.reviewer.review@1.0.0#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!invoke",
+    "payload_base64": "e30=",
+    "payload_hex_reference": "7b7d",
+    "invocation_nonce_hex": "22222222222222222222222222222222",
+    "causal_context": {
+      "form": "none"
+    }
+  },
+
+  "expected": {
+    "args_digest_hex": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "caller_pubkey_hex": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+    "canonical_invocation_sha256": "9fb42b3d577d87faf332efd248c5f94fd27f1d503f1bf36cb509b0963369ac5e",
+    "caller_signature_base64": "d+ysJmzE6ob60uXshCLrgbzmAg6+/rTlaFbd5QJxl5czL0crgb8zt9rYOgu8uUyD3GkVpsTV6E3nq7gPa9hcBQ=="
+  },
+
+  "invariants": {
+    "metadata_excluded": {
+      "description": "Adding arbitrary non-axiom metadata MUST NOT change canonical_invocation_sha256. Conformant SDKs produce byte-identical canonical bytes for the envelope above regardless of any metadata attached at transport level.",
+      "metadata_probe": {
+        "x-trace-id": "t-12345",
+        "x-other-hint": "unused"
+      },
+      "required_assertion": "sha256(canonical_descriptor_bound_invocation_bytes(envelope_with_metadata_probe)) == expected.canonical_invocation_sha256"
+    },
+    "nonce_not_generated_from_time_or_uuid": {
+      "description": "When a test generates its own nonce (for fresh calls unrelated to this vector), it MUST use the SDK's fresh_nonce / freshNonce CSPRNG wrapper. Using time, UUID, counter, or hash is prohibited and MUST be caught by code review / grep.",
+      "grep_prohibitions": [
+        "time.Now()",
+        "Date.now()",
+        "time.time()",
+        "System.currentTimeMillis()",
+        "Date()",
+        "uuid.Uuid::new_v4",
+        "uuid.uuid4()",
+        "crypto.randomUUID()",
+        "UUID.randomUUID()"
+      ]
+    },
+    "seed_pubkey_binding": {
+      "description": "expected.caller_pubkey_hex is the pure Ed25519 derivation of inputs.signing_seed_hex per RFC 8032 §5.1.5. Divergence here means the SDK's Ed25519 library is wrong, not that this file drifted.",
+      "reference_standard": "RFC 8032 §5.1.5"
+    }
+  },
+
+  "provenance": {
+    "reference_implementation": "sdk/rust/examples/emit_worked_example.rs",
+    "reference_sdk": "axon-sdk (Rust)",
+    "pin_tests": [
+      "sdk/rust/src/invocation/axiom.rs::tests::worked_example_args_digest_is_pinned",
+      "sdk/rust/src/invocation/axiom.rs::tests::worked_example_caller_pubkey_is_pinned",
+      "sdk/rust/src/invocation/axiom.rs::tests::worked_example_canonical_invocation_sha256_is_pinned",
+      "sdk/rust/src/invocation/axiom.rs::tests::worked_example_signature_is_pinned"
+    ],
+    "regeneration_procedure": "cd sdk/rust && cargo run --example emit_worked_example"
+  },
+
+  "consumers": {
+    "required_test_files": [
+      "sdk/rust/tests/axiom_worked_example.rs",
+      "sdk/go/axon/invocation/axiom_worked_example_test.go",
+      "sdk/python/tests/test_axiom_worked_example.py",
+      "sdk/node/tests/axiom-worked-example.test.mjs",
+      "sdk/java/src/test/java/run/axon/sdk/invocation/AxiomWorkedExampleTest.java",
+      "sdk/swift/Tests/AxonSDKTests/AxiomWorkedExampleTests.swift"
+    ],
+    "loader_rule": "Each SDK test MUST load this JSON file (path resolution walks up from current dir to find sdk/conformance/cases/axiom/). Tests MUST NOT hard-code the inputs or expected values; the JSON is the ONLY source of truth."
+  }
+}

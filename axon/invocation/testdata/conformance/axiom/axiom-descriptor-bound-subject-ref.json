@@ -1,0 +1,57 @@
+{
+  "id": "axiom-descriptor-bound-subject-ref",
+  "rfc": "001",
+  "severity": "critical",
+  "invariant": "INV-1",
+  "title": "descriptor-bound signed bytes derive subject EntityRef and ability descriptor ref",
+  "description": "Descriptor-bound invocations MUST sign the canonical subject EntityRef derived from subject and the AbilityDescriptorRef carried directly in ability. First-party request inputs MUST NOT carry subject_ref or a separate descriptor_version.",
+  "inputs": {
+    "caller": {
+      "ura": "easynet:///r/silan/agent/silan.planner",
+      "profile": "axon-strict-v2"
+    },
+    "callee": {
+      "ura": "easynet:///r/silan/agent/silan.state-host",
+      "profile": "axon-strict-v2"
+    },
+    "subject": {
+      "ura": "easynet:///r/silan/resource/plan-42/v3",
+      "profile": "axon-strict-v2"
+    },
+    "ability": "easynet:///r/silan/ability/silan.state.apply@3.0.0#cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc!invoke",
+    "args_digest_hex": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "invocation_nonce_hex": "22222222222222222222222222222222",
+    "causal_context": {
+      "form": "none"
+    }
+  },
+  "mutations": {
+    "ability": "easynet:///r/silan/ability/silan.state.apply@4.0.0#cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc!invoke"
+  },
+  "expect": {
+    "canonical_entity_ref_hex": "0100000026656173796e65743a2f2f2f722f73696c616e2f7265736f757263652f706c616e2d34322f76330000000e61786f6e2d7374726963742d7632",
+    "canonical_entity_ref_sha256": "8daea57cb95b5d67061d28574585c806dd94f65b9c49c51b0f97be979739cfc3",
+    "canonical_descriptor_bound_invocation_sha256": "98a264112918d11b840869a80efec35903325eaced2e8275865e119fc968020a",
+    "ability_ref_swap_descriptor_bound_invocation_sha256": "b7ae0c44c6573e6494c7b1019e5b8594e47e98b883145f00e4e8e2da81ab4fda",
+    "ability_ref_changes_descriptor_bound_invocation": true
+  },
+  "provenance": {
+    "reference_impl": "sdk/rust/src/invocation/axiom.rs::canonical_descriptor_bound_invocation_bytes",
+    "core_proto": [
+      "core/proto/axon/v1/types.proto::EntityRef",
+      "core/proto/axon/v1/types.proto::Envelope.subject",
+      "core/proto/axon/v1/invoke.proto::InvokeRequest.function_name"
+    ]
+  },
+  "consumers": {
+    "required_test_files": [
+      "sdk/rust/tests/axiom_vectors.rs",
+      "sdk/go/axon/invocation/axiom_vectors_test.go",
+      "sdk/node/tests/axiom-vectors.test.mjs",
+      "sdk/python/tests/test_axiom_vectors.py",
+      "sdk/java/src/test/java/run/axon/sdk/invocation/AxiomVectorsTest.java",
+      "sdk/swift/Tests/AxonSDKTests/AxiomVectorsTests.swift"
+    ],
+    "loader_rule": "Each SDK axiom-vector test MUST load this JSON file from sdk/conformance/cases/axiom/. Tests MUST NOT hard-code inputs or expected values; the JSON is the ONLY source of truth."
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "id": "axiom-cross-language-verify-parity",
+  "rfc": "001",
+  "severity": "critical",
+  "invariant": "PARITY",
+  "title": "a bundle produced by one SDK verifies under axon-verify built from another SDK",
+  "documentation_only": true,
+  "documentation_only_reason": "This case is an authoritative description of the Week 3 cross-SDK parity matrix. The actual runnable assertions live in per-SDK integration tests (see producer_sdks → notes). Vector-driver files MUST treat documentation_only=true as a skip rather than a missing handler.",
+  "description": "RFC 001 §5.4 requires that a receipt bundle produced by any SDK verify cleanly under the canonical Rust axon-verify binary. Each SDK emits a canonical 2-invocation bundle (one root, one scalar successor) signed with Ed25519, then spawns axon-verify against the temporary directory. Exit 0 plus 'chain verified' establishes byte-level parity for every wire-facing encoder (identity, causal context, invocation bytes, receipt bytes) with the Rust reference. A tamper control that changes one hex digit in a receipt signature MUST produce a non-zero exit.\n\nThe release-blocking consumers are:\n  - sdk/python/tests/test_cross_language_verify.py\n  - sdk/go/axon/invocation/cross_language_verify_test.go\n  - sdk/node/tests/cross-language-verify.test.mjs\n  - sdk/java/src/test/java/run/axon/sdk/invocation/CrossLanguageVerifyTest.java\n  - sdk/swift/Tests/AxonSDKTests/CrossLanguageVerifyTests.swift\n  - sdk/rust/tests/verify_binary.rs and sdk/rust/tests/verify_end_to_end.rs",
+  "producer_sdks": [
+    "rust",
+    "python",
+    "go",
+    "node",
+    "java",
+    "swift"
+  ],
+  "verifier": "rust:sdk/rust/src/bin/verify.rs",
+  "bundle_shape": {
+    "receipts_dir": {
+      "invocations/<invocation_id>.json": "InvocationJSON per sdk/rust/src/invocation/bundle.rs",
+      "receipts/<invocation_id>/<index>.json": "ReceiptJSON per sdk/rust/src/invocation/bundle.rs",
+      "keys/<alias>.ed25519": "raw 32-byte Ed25519 public key"
+    }
+  },
+  "shared_scenario": {
+    "agents": {
+      "silan": "easynet:///r/silan/agents/writer@1   (caller)",
+      "openai": "easynet:///r/openai/agents/reviewer@1 (callee)"
+    },
+    "subject": "easynet:///r/silan/resource/silan.papers/p-draft-1",
+    "invocations": [
+      {
+        "id": "inv-a",
+        "ability": "easynet:///r/openai/ability/openai.reviewer.review@1.0.0#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!invoke",
+        "causal_context": {
+          "form": "none"
+        },
+        "receipts": [
+          "admitted",
+          "completed"
+        ]
+      },
+      {
+        "id": "inv-b",
+        "ability": "easynet:///r/openai/ability/openai.summarizer.summarize@1.0.0#dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd!invoke",
+        "causal_context": {
+          "form": "scalar",
+          "predecessor": "inv-a/1 terminal self-hash"
+        },
+        "receipts": [
+          "admitted",
+          "completed"
+        ]
+      }
+    ]
+  },
+  "expect": {
+    "verify_exit_code": 0,
+    "verify_stdout_contains": [
+      "chain verified",
+      "4 receipts",
+      "2 invocations"
+    ],
+    "tamper_control": {
+      "action": "flip last hex digit of inv-a receipt[1].callee_signature_hex",
+      "expect_exit_code_nonzero": true,
+      "expect_stderr_contains": "FAIL"
+    }
+  },
+  "binary_lookup_order": [
+    "AXON_VERIFY_BIN env var",
+    "<repo>/sdk/rust/target/debug/axon-verify",
+    "skip (not fail) if neither present"
+  ],
+  "notes": [
+    "This case does not attempt the inverse matrix. Rust's axon-verify is the canonical conformance reference; parity is established when it accepts every SDK producer.",
+    "The producer bundle recipe is shared across all six per-SDK tests by convention, not by a shared fixture file — each SDK's test constructs the same scenario using its own axiom + bundle modules. If the recipe drifts in one SDK, the Rust verifier will catch it as a signature / chain-walk failure."
+  ],
+  "consumers": {
+    "required_test_files": [
+      "sdk/rust/tests/verify_binary.rs",
+      "sdk/rust/tests/verify_end_to_end.rs",
+      "sdk/go/axon/invocation/cross_language_verify_test.go",
+      "sdk/node/tests/cross-language-verify.test.mjs",
+      "sdk/python/tests/test_cross_language_verify.py",
+      "sdk/java/src/test/java/run/axon/sdk/invocation/CrossLanguageVerifyTest.java",
+      "sdk/swift/Tests/AxonSDKTests/CrossLanguageVerifyTests.swift"
+    ],
+    "loader_rule": "This critical vector is not optional. The listed tests are the release-blocking consumers for the contract pinned here."
+  }
+}

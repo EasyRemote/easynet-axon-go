@@ -1,0 +1,62 @@
+{
+  "axiom/axiom-admission-pipeline.json": {
+    "sha256": "6bbbd5a694e94a311cbe66c5319bf0ba9236da2ce81d1301371ce046f40e7c81",
+    "source": "sdk/conformance/cases/axiom/axiom-admission-pipeline.json"
+  },
+  "axiom/axiom-bidi-frame-chain.json": {
+    "sha256": "ad07a7c328382ccbaf629c132dcb8090f51063c74f1ee1e3049374468da6e1d3",
+    "source": "sdk/conformance/cases/axiom/axiom-bidi-frame-chain.json"
+  },
+  "axiom/axiom-cross-language-verify-parity.json": {
+    "sha256": "4b855a2105b61cc20cbe5d421cdd866a22633fae30f8ad171bc7df0e02a0459b",
+    "source": "sdk/conformance/cases/axiom/axiom-cross-language-verify-parity.json"
+  },
+  "axiom/axiom-descriptor-bound-subject-ref.json": {
+    "sha256": "ffb346dec4b2c69daf43097ae526187ce7498acbcc8511c79e380069ea77911a",
+    "source": "sdk/conformance/cases/axiom/axiom-descriptor-bound-subject-ref.json"
+  },
+  "axiom/axiom-e2-caller-sig-required.json": {
+    "sha256": "0390c355b8c7d5c1ad3eb03614c41be2b7d536447c5403533100eca280da7b45",
+    "source": "sdk/conformance/cases/axiom/axiom-e2-caller-sig-required.json"
+  },
+  "axiom/axiom-e3-nonce-replay-discriminated.json": {
+    "sha256": "ceb1ce860a56c9d163aea366223945a89d78a96a6163e30e9a4843f89d8c6849",
+    "source": "sdk/conformance/cases/axiom/axiom-e3-nonce-replay-discriminated.json"
+  },
+  "axiom/axiom-e4-subject-distinct-from-callee.json": {
+    "sha256": "89ff28db22eafb4d3c5a068aa884e0d325d67af780af86d3a007f543a15a17e5",
+    "source": "sdk/conformance/cases/axiom/axiom-e4-subject-distinct-from-callee.json"
+  },
+  "axiom/axiom-e5-causal-none-root.json": {
+    "sha256": "8280b33a68993795de2a8b56a115ab1ca3bc5f2741452d6d1644ad2a647b34d8",
+    "source": "sdk/conformance/cases/axiom/axiom-e5-causal-none-root.json"
+  },
+  "axiom/axiom-e6-causal-scalar.json": {
+    "sha256": "c53e14a7822bff42727cdd8f72002a0374437b4f53c6c4827a37e7d8419d48ba",
+    "source": "sdk/conformance/cases/axiom/axiom-e6-causal-scalar.json"
+  },
+  "axiom/axiom-e7-causal-list-fanin.json": {
+    "sha256": "d395afd969677b93bf7a7523b457ecee45311a47c50ef769f86c91de666f1d36",
+    "source": "sdk/conformance/cases/axiom/axiom-e7-causal-list-fanin.json"
+  },
+  "axiom/axiom-identity-composite-required.json": {
+    "sha256": "7a2a918eb2ed978c9d8011f74ed4e7aef137bb187ca9b1c6a1122e65dc67ba7e",
+    "source": "sdk/conformance/cases/axiom/axiom-identity-composite-required.json"
+  },
+  "axiom/axiom-profile-binding.json": {
+    "sha256": "f7fe6b4187110c7254c3f3ff68ae3422bd0cf013b6d297f57c936c557a0d1962",
+    "source": "sdk/conformance/cases/axiom/axiom-profile-binding.json"
+  },
+  "axiom/axiom-subject-survives-callee-swap.json": {
+    "sha256": "5cd9e6f76f75ac4b2a53716329f2bad0f74f004f17376d0e45df5d025573b5cc",
+    "source": "sdk/conformance/cases/axiom/axiom-subject-survives-callee-swap.json"
+  },
+  "axiom/axiom-worked-example-authenticated.json": {
+    "sha256": "6a5db20f77664f56505512f21741104a57bf3ca964276b8bc849a755cbfe07d4",
+    "source": "sdk/conformance/cases/axiom/axiom-worked-example-authenticated.json"
+  },
+  "invocation-ledger-json-v1.json": {
+    "sha256": "b287461645e3462329aa04c81b6cfec117ed33bbeb4774ce1be554aaad129f83",
+    "source": "packaging/protocol-pack/conformance-vectors/invocation-ledger-json-v1.json"
+  }
+}

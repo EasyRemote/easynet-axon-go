@@ -1,0 +1,113 @@
+{
+  "id": "axiom-bidi-frame-chain",
+  "rfc": "001-a16",
+  "severity": "critical",
+  "invariant": "S16",
+  "title": "InvokeBidi per-direction HMAC chain anchored on Ed25519 envelope signature",
+  "description": "RFC 001 §A16 (P5-rewrite-15) introduces the InvokeBidi RPC for bidirectional realtime multimodal sessions. A bidi session is one Invocation governed by the same seven-tuple as Invoke / InvokeStream — no eighth axiom parameter — but its body consists of frames that must be integrity-bound to the signed envelope.\n\nThis case pins the four byte-level constants every conforming SDK port MUST reproduce:\n\n  1. HKDF-SHA256 derivation of two per-direction MAC keys from (envelope_signature, invocation_nonce). Salt and per-direction info labels are protocol-versioned.\n  2. HMAC-SHA256-32 chain over (sequence_be_8 || prev_mac || canonical_payload_bytes). Frame 1 anchors on the 64-byte Ed25519 envelope signature; frames N≥2 anchor on the previous frame's 32-byte tag.\n  3. Canonical bidi-frame encoding: prost deterministic encoding of `InvokeBidiUp` / `InvokeBidiDown` with the `mac` field cleared to empty bytes before encoding. Both producer (caller) and verifier (callee) feed identical bytes into HMAC.\n  4. Wedge property: flipping a single byte in any frame N's canonical payload changes every subsequent tag in that direction; frame N-1's tag is unchanged.",
+  "binding_constants": {
+    "hkdf_salt_utf8": "easynet-bidi-mac:v1",
+    "hkdf_info_caller_to_callee_utf8": "easynet-bidi-mac:v1/caller-to-callee",
+    "hkdf_info_callee_to_caller_utf8": "easynet-bidi-mac:v1/callee-to-caller",
+    "hmac_tag_length_bytes": 32,
+    "frame_zero_signature_length_bytes": 64,
+    "v1_ordering": "STRICT (case-sensitive; empty string accepted as default)"
+  },
+  "anchor_vector_hkdf": {
+    "inputs": {
+      "envelope_signature_bytes_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "envelope_signature_bytes_recipe": "64 bytes, every byte = 0xAA",
+      "invocation_nonce_utf8": "anchor-nonce-fixed",
+      "invocation_nonce_bytes_recipe": "ASCII bytes of \"anchor-nonce-fixed\" — 18 bytes (the anchor uses a non-16-byte string deliberately to keep the recipe portable across SDKs that may impose tighter nonce-length validation; production envelopes use a 16-byte CSPRNG nonce per RFC 001 §3.2.5)"
+    },
+    "expected_outputs": {
+      "up_key_hex": "7f99bbbd1129181037bdff2ef6d341288b4caefef0f3061e0557bb566a54b80f",
+      "down_key_hex": "9bce0a2fa167b94e933c9f59aca63c41ac770f046672de27c884dd15cf7d86f9",
+      "rule": "up_key MUST NOT equal down_key (different `info` labels). Re-deriving with the same inputs MUST produce the same bytes."
+    },
+    "reference_test": "sdk/rust/src/invocation/bidi.rs::tests::hkdf_cross_language_anchor"
+  },
+  "anchor_vector_frame_mac": {
+    "inputs": {
+      "key_bytes_hex": "7777777777777777777777777777777777777777777777777777777777777777",
+      "key_bytes_recipe": "32 bytes, every byte = 0x77",
+      "sequence_u64_be": 1,
+      "prev_mac_bytes_hex": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "prev_mac_bytes_recipe": "64 zero bytes (simulating frame-0 Ed25519 signature anchor for frame 1)",
+      "canonical_payload_bytes_utf8": "payload-1"
+    },
+    "expected_outputs": {
+      "tag_hex": "541acaeda4659e59ea904e97b9eff2c6a2c0aaac3b66c2fd2ac34a61a2f8ea08"
+    },
+    "reference_test": "sdk/rust/src/invocation/bidi.rs::tests::frame_mac_cross_language_anchor"
+  },
+  "wedge_property": {
+    "rule": "For any chain (key, envelope_signature, payloads[]) producing tags[i], flipping one byte in payloads[k] (1-indexed) yields a chain whose tag[k-1] is identical to the original but tags[k..] all differ.",
+    "reference_test": "sdk/rust/src/invocation/bidi.rs::tests::frame_mac_multi_frame_chain_propagates_changes",
+    "inputs": {
+      "key_bytes_hex": "5555555555555555555555555555555555555555555555555555555555555555",
+      "anchor_bytes_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "payloads_utf8": ["frame-1", "frame-2", "frame-3", "frame-4"],
+      "tampered_payloads_utf8": ["frame-1", "frame-2!", "frame-3", "frame-4"]
+    },
+    "narrative_recipe": "(1) Build an honest 4-frame chain from anchor=64×0xAA with payloads=[\"frame-1\",\"frame-2\",\"frame-3\",\"frame-4\"] under key=32×0x55. (2) Build a tampered chain where payloads[1] = \"frame-2!\" (one byte appended). (3) Assert tags[0] match (frame-1 anchored on the same envelope_signature, payload unchanged) AND tags[i] differ for i ∈ {1,2,3} (the chain wedges every successor)."
+  },
+  "wire_format_pins": {
+    "frame_zero_payload_must_be_envelope_open": true,
+    "frame_zero_sequence_must_be_zero": true,
+    "frame_zero_mac_must_equal_envelope_caller_signature": true,
+    "frame_zero_mac_length_bytes": 64,
+    "frame_n_mac_length_bytes_when_n_at_least_one": 32,
+    "sequence_strict_rule": "frame.sequence MUST equal last_seen + 1 exactly; gaps and reorders rejected with AXON_BIDI_FRAME_SEQUENCE",
+    "stream_id_rule": "0 acceptable iff streams[] empty or contains exactly one descriptor; otherwise stream_id MUST match a declared id (else AXON_BIDI_UNKNOWN_STREAM_ID)",
+    "ordering_rule": "StreamDescriptor.ordering MUST be empty or \"STRICT\" in v1 (case-sensitive); else AXON_BIDI_NON_STRICT_ORDERING"
+  },
+  "wire_visible_reason_codes": [
+    "AXON_BIDI_FIRST_FRAME_NOT_OPEN",
+    "AXON_BIDI_FIRST_FRAME_SEQUENCE",
+    "AXON_BIDI_FRAME_ZERO_SIG_LEN",
+    "AXON_BIDI_FRAME_ZERO_SIG_MISMATCH",
+    "AXON_BIDI_OPEN_ENVELOPE_MISSING",
+    "AXON_BIDI_OPEN_TARGET_MISSING",
+    "AXON_BIDI_FRAME_MAC_LEN",
+    "AXON_BIDI_FRAME_SEQUENCE",
+    "AXON_BIDI_FRAME_MAC_INVALID",
+    "AXON_BIDI_UNKNOWN_STREAM_ID",
+    "AXON_BIDI_DUPLICATE_OPEN",
+    "AXON_BIDI_NON_STRICT_ORDERING",
+    "AXON_RECEIPT_SIGNER_REQUIRED",
+    "AXON_BIDI_FRAME_ZERO_RECEIPT_MISSING",
+    "AXON_BIDI_CALLER_DISCONNECT"
+  ],
+  "four_gate_sequence": [
+    "signature_policy",
+    "admission",
+    "membership",
+    "delegation"
+  ],
+  "expect": {
+    "hkdf_up_key_hex": "7f99bbbd1129181037bdff2ef6d341288b4caefef0f3061e0557bb566a54b80f",
+    "hkdf_down_key_hex": "9bce0a2fa167b94e933c9f59aca63c41ac770f046672de27c884dd15cf7d86f9",
+    "frame_mac_tag_hex": "541acaeda4659e59ea904e97b9eff2c6a2c0aaac3b66c2fd2ac34a61a2f8ea08",
+    "wedge_unchanged_prefix_count": 1,
+    "wedge_changed_suffix_count": 3
+  },
+  "notes": [
+    "Confidentiality is intentionally out of scope at the frame layer. Production deployments rely on TLS for confidentiality of `BinaryChunk.data`; per-direction AEAD is reserved for a future amendment if a deployment needs to defend against a compromised TLS terminator.",
+    "Loss-tolerant ordering (StreamDescriptor.ordering = \"LOSS_TOLERANT\") is reserved for a v2 amendment. v1 receivers MUST reject any non-STRICT ordering. PTY and any control-plane stream stay STRICT unconditionally because their frames carry irreversible operations (process input, signals, resize) for which silent loss is unacceptable.",
+    "The seven-tuple invariance is preserved: opening InvokeBidi does not introduce an eighth AXIOM parameter. The frame chain is a derived obligation over the existing signed envelope, not a parameter extension.",
+    "Every conforming SDK port MUST pass the two per-byte anchor vectors and the wedge-property test exactly. Ports that emit InvokeBidi frames MUST also enforce the wire-format pins (sequence strictness, MAC length, sig-anchor match) and emit one of the listed reason codes on rejection."
+  ],
+  "consumers": {
+    "required_test_files": [
+      "sdk/rust/src/invocation/bidi.rs",
+      "sdk/rust/tests/axiom_vectors.rs",
+      "sdk/go/axon/invocation/axiom_vectors_test.go",
+      "sdk/node/scripts/run-axiom-vectors.mjs",
+      "sdk/python/tests/test_axiom_vectors.py",
+      "sdk/java/src/test/java/run/axon/sdk/invocation/AxiomVectorsTest.java",
+      "sdk/swift/Tests/AxonSDKTests/AxiomVectorsTests.swift"
+    ],
+    "loader_rule": "This critical vector is not optional. The listed tests are the release-blocking consumers for the contract pinned here."
+  }
+}

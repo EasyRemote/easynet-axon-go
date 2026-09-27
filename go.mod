@@ -1,3 +1,3 @@
-module easynet.run/axon/sdk/go
+module axon.run/sdk/go
 
 go 1.22

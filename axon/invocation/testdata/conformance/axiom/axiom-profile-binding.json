@@ -1,0 +1,47 @@
+{
+  "id": "axiom-profile-binding",
+  "rfc": "001",
+  "severity": "critical",
+  "invariant": "INV-5",
+  "title": "profile substitution produces different signing bytes (anti-profile-confusion)",
+  "description": "A signature produced under profile A MUST NOT verify against the same URA under profile B, even if a re-hash of the URA alone would collide. This vector signs once under axon-strict-v2 and attempts verification under web-safe-v2 — must fail.",
+  "inputs": {
+    "caller": {
+      "ura": "easynet:///r/silan/agent/silan.q",
+      "profile": "axon-strict-v2"
+    },
+    "callee": {
+      "ura": "easynet:///r/openai/agent/openai.q",
+      "profile": "axon-strict-v2"
+    },
+    "subject": {
+      "ura": "easynet:///r/silan/agent/silan.q",
+      "profile": "axon-strict-v2"
+    },
+    "ability": "easynet:///r/openai/ability/openai.agent.echo@1.0.0#bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb!invoke",
+    "args_digest_hex": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "invocation_nonce_hex": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "causal_context": {
+      "form": "none"
+    },
+    "caller_secret_hex": "0606060606060606060606060606060606060606060606060606060606060606",
+    "profile_swap_on_verify": {
+      "caller": "web-safe-v2"
+    }
+  },
+  "expect": {
+    "caller_signature_valid_after_profile_swap": false,
+    "expected_error_contains": "CALLER_SIGNATURE_INVALID"
+  },
+  "consumers": {
+    "required_test_files": [
+      "sdk/rust/tests/axiom_vectors.rs",
+      "sdk/go/axon/invocation/axiom_vectors_test.go",
+      "sdk/node/tests/axiom-vectors.test.mjs",
+      "sdk/python/tests/test_axiom_vectors.py",
+      "sdk/java/src/test/java/run/axon/sdk/invocation/AxiomVectorsTest.java",
+      "sdk/swift/Tests/AxonSDKTests/AxiomVectorsTests.swift"
+    ],
+    "loader_rule": "This critical vector is not optional. The listed tests are the release-blocking consumers for the contract pinned here."
+  }
+}

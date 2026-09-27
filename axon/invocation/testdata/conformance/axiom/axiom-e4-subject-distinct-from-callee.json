@@ -1,0 +1,50 @@
+{
+  "id": "axiom-e4-subject-distinct-from-callee",
+  "rfc": "001",
+  "severity": "critical",
+  "invariant": "INV-7",
+  "title": "subject URA can differ in namespace/scope/type from callee URA",
+  "description": "Under RFC 001, a callee agent can act on a subject that lives in a different namespace. A receipt records both URAs independently. This test pins that the runtime MUST accept a subject whose namespace/scope/subject-type differs from the callee.",
+  "inputs": {
+    "caller": {
+      "ura": "easynet:///r/silan/agent/silan.writer",
+      "profile": "axon-strict-v2"
+    },
+    "callee": {
+      "ura": "easynet:///r/openai/agent/openai.reviewer",
+      "profile": "axon-strict-v2"
+    },
+    "subject": {
+      "ura": "easynet:///r/silan/resource/silan.papers/paper-draft-1",
+      "profile": "axon-strict-v2"
+    },
+    "ability": "easynet:///r/openai/ability/openai.reviewer.review@1.0.0#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!invoke",
+    "args_digest_hex": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "invocation_nonce_hex": "cccccccccccccccccccccccccccccccc",
+    "causal_context": {
+      "form": "none"
+    },
+    "caller_secret_hex": "0404040404040404040404040404040404040404040404040404040404040404",
+    "callee_secret_hex": "0505050505050505050505050505050505050505050505050505050505050505"
+  },
+  "expect": {
+    "caller_signature_valid": true,
+    "subject_distinct_from_callee": true
+  },
+  "runtime_expect": {
+    "_note": "Invariants that are NOT offline-verifiable from this vector's inputs and are therefore not consumed by the offline axiom-vector drivers. They are exercised by the runtime e2e suite named below; keeping them out of `expect` stops them from masquerading as offline-pinned.",
+    "receipts_record_both_independently": true,
+    "runtime_consumer": "sdk/rust/tests/axiom_vectors.rs"
+  },
+  "consumers": {
+    "required_test_files": [
+      "sdk/rust/tests/axiom_vectors.rs",
+      "sdk/go/axon/invocation/axiom_vectors_test.go",
+      "sdk/node/tests/axiom-vectors.test.mjs",
+      "sdk/python/tests/test_axiom_vectors.py",
+      "sdk/java/src/test/java/run/axon/sdk/invocation/AxiomVectorsTest.java",
+      "sdk/swift/Tests/AxonSDKTests/AxiomVectorsTests.swift"
+    ],
+    "loader_rule": "This critical vector is not optional. The listed tests are the release-blocking consumers for the contract pinned here."
+  }
+}

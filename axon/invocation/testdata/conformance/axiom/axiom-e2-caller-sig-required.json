@@ -1,0 +1,48 @@
+{
+  "id": "axiom-e2-caller-sig-required",
+  "rfc": "001",
+  "severity": "critical",
+  "invariant": "INV-2",
+  "title": "signature produced under one envelope must not verify for another",
+  "description": "Signing bytes cover the full seven-tuple. If a verifier is given a mismatched envelope but a valid-looking signature, verification fails. This is the test that demonstrates the caller's signature cannot be stripped or replayed against a different envelope.",
+  "inputs": {
+    "caller": {
+      "ura": "easynet:///r/silan/agent/silan.x",
+      "profile": "axon-strict-v2"
+    },
+    "callee": {
+      "ura": "easynet:///r/openai/agent/openai.y",
+      "profile": "axon-strict-v2"
+    },
+    "subject": {
+      "ura": "easynet:///r/silan/resource/silan.subject/s-1",
+      "profile": "axon-strict-v2"
+    },
+    "ability": "easynet:///r/openai/ability/openai.agent.echo@1.0.0#bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb!invoke",
+    "args_digest_hex": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "invocation_nonce_hex": "22222222222222222222222222222222",
+    "causal_context": {
+      "form": "none"
+    },
+    "caller_secret_hex": "0202020202020202020202020202020202020202020202020202020202020202",
+    "tamper": {
+      "kind": "swap_nonce",
+      "new_invocation_nonce_hex": "33333333333333333333333333333333"
+    }
+  },
+  "expect": {
+    "caller_signature_valid_after_tamper": false,
+    "expected_error_contains": "CALLER_SIGNATURE_INVALID"
+  },
+  "consumers": {
+    "required_test_files": [
+      "sdk/rust/tests/axiom_vectors.rs",
+      "sdk/go/axon/invocation/axiom_vectors_test.go",
+      "sdk/node/tests/axiom-vectors.test.mjs",
+      "sdk/python/tests/test_axiom_vectors.py",
+      "sdk/java/src/test/java/run/axon/sdk/invocation/AxiomVectorsTest.java",
+      "sdk/swift/Tests/AxonSDKTests/AxiomVectorsTests.swift"
+    ],
+    "loader_rule": "This critical vector is not optional. The listed tests are the release-blocking consumers for the contract pinned here."
+  }
+}

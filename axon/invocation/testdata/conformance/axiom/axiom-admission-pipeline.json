@@ -1,0 +1,102 @@
+{
+  "id": "axiom-admission-pipeline",
+  "rfc": "001",
+  "section": "5.2",
+  "severity": "critical",
+  "invariant": "ADMISSION",
+  "title": "admission pipeline emits the three canonical rejection reasons with matching wire contracts across all six SDKs",
+  "documentation_only": true,
+  "documentation_only_reason": "The six declared admission integration tests execute this stateful contract because the generic pure-vector runners do not own a LocalRuntime. Every declared test must load this file and assert its expect block; documentation_only is a runner classification, not an evidence exemption.",
+  "overview": "Every DescriptorBoundInvocationRequest runs four sequential checks before the envelope is allowed to transition to Admitted: (1) validate_envelope, (2) validate_signature_structure, (3) descriptor-bound caller-signature verification through a required KeyResolver, (4) nonce-replay check. The first failure rejects; the envelope does not progress and no admitted receipt is emitted.",
+  "pipeline_order": [
+    "validate_envelope         // always on",
+    "validate_signature_structure  // always on, MUST precede replay-store insert",
+    "verify_descriptor_bound_signature  // always on through the runtime's required KeyResolver",
+    "check_nonce_replay        // always on; key = (caller.ura, ability, invocation_nonce)"
+  ],
+  "rejection_reasons": {
+    "AXON_AXIOM_ENVELOPE_INCOMPLETE": {
+      "kind": "InvalidArgument",
+      "trigger_examples": [
+        "ability is empty",
+        "caller.ura / callee.ura / subject.ura is empty",
+        "invocation_nonce is all zero (2^-128 CSPRNG accident vs uninitialised-field mistake)",
+        "args_digest length != 32",
+        "invocation_nonce length != 16"
+      ],
+      "message_format": "granular sub-reason string (e.g. `ability_empty`, `invocation_nonce_all_zero`) in the AxonError.message field for operator visibility; `reason` stays the canonical ALLCAPS constant."
+    },
+    "AXON_CALLER_SIGNATURE_INVALID": {
+      "kind": "InvalidArgument",
+      "trigger_examples": [
+        "signature algorithm is empty",
+        "signature algorithm is not \"ed25519\"",
+        "ed25519 signature length != 64",
+        "KeyResolver is unavailable",
+        "signature fails crypto verify against resolver-supplied public key"
+      ],
+      "message_format": "sub-reason (`signature_algorithm_empty`, `ed25519_signature_wrong_length`, `unsupported_algorithm:<id>`, or the wrapped axiom-layer error text) in message."
+    },
+    "AXON_NONCE_REPLAY": {
+      "kind": "InvalidArgument",
+      "trigger_examples": [
+        "the tuple (caller.ura, ability, nonce) was observed within the current dedup window"
+      ],
+      "message_format": "`dedup_window_hit:prev_ts=<ms>:window_ms=<ms>` in message; machine-parseable."
+    }
+  },
+  "trust_model": {
+    "name": "provider_backed",
+    "resolver": "required runtime dependency",
+    "checks_run": "full four-step pipeline including cryptographic caller verification",
+    "missing_resolver": "reject with AXON_CALLER_SIGNATURE_INVALID before replay-store mutation",
+    "rationale": "A LocalRuntime is an admission authority, not the caller that just signed. Same-process placement does not permit self-asserted identity or a second local-fast authority model."
+  },
+  "replay_store_contract": {
+    "dedup_key": "(caller.ura, ability, invocation_nonce)",
+    "ability_in_key_rationale": "A legitimate (caller, nonce) reused across two distinct abilities MUST NOT be misdedup'd. Review feedback required this.",
+    "window_ms_default": 604800000,
+    "window_ms_default_rationale": "7 days — correctness/idempotency guard, not a security counter. Operators can tune via set_admission_dedup_window_ms(ms).",
+    "pollution_invariant": "Malformed envelopes and malformed signatures MUST NOT enter the replay store. Pipeline ordering (envelope → structure → verify → replay) enforces this; each SDK has a dedicated test asserting the replay store size stays 0 after an early-stage reject.",
+    "persistence": "Week-3 scope is per-runtime in-memory. Week-5+ swaps for a WAL-backed store with the production runtime's durability contract."
+  },
+  "configuration_contract": {
+    "request_type": "DescriptorBoundInvocationRequest",
+    "resolver_lifecycle": "required before public dispatch; no clear-to-local-fast operation",
+    "dedup_window": "operator-configurable without changing the authority model"
+  },
+  "per_sdk_test_files": [
+    "sdk/rust/src/invocation/admission.rs       (unit, 20 tests)",
+    "sdk/rust/tests/admission.rs                 (runtime integration, 8 tests)",
+    "sdk/python/tests/test_admission.py          (unit + runtime, 11 tests)",
+    "sdk/go/axon/invocation/admission_test.go (unit + runtime, 24 tests)",
+    "sdk/node/tests/admission.test.mjs           (unit + runtime, 24 tests)",
+    "sdk/java/src/test/.../AdmissionTest.java    (unit + runtime, 24 tests)",
+    "sdk/swift/Tests/.../AdmissionTests.swift    (unit + runtime, 24 tests)"
+  ],
+  "expect": {
+    "reason_strings_are_literal_RFC_5_2_text": true,
+    "pipeline_ordering_enforced": true,
+    "replay_store_not_polluted_by_early_rejects": true,
+    "dedup_key_includes_ability": true,
+    "resolver_required": true,
+    "local_fast_absent": true,
+    "descriptor_bound_request_is_sole_public_input": true,
+    "crypto_verify_always_runs": true
+  },
+  "notes": [
+    "The actual assertions are per-SDK because AxonError shapes and test harnesses differ. Each declared test loads this JSON and proves the same request, resolver, rejection, ordering, and replay invariants.",
+    "When changing the RFC §5.2 wire contract (adding a new rejection reason, changing a reason literal, or reordering the pipeline), every SDK's admission test must be updated in the same commit, and this JSON must be updated to describe the new shape. A divergence here is a spec bug."
+  ],
+  "consumers": {
+    "required_test_files": [
+      "sdk/rust/tests/admission.rs",
+      "sdk/go/axon/invocation/admission_test.go",
+      "sdk/node/tests/admission.test.mjs",
+      "sdk/python/tests/test_admission.py",
+      "sdk/java/src/test/java/run/axon/sdk/invocation/AdmissionTest.java",
+      "sdk/swift/Tests/AxonSDKTests/AdmissionTests.swift"
+    ],
+    "loader_rule": "This critical vector is not optional. The listed tests are the release-blocking consumers for the contract pinned here."
+  }
+}
